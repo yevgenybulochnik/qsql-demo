@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# qsql generated outputs
+data/
+*.parquet
+warehouse.db
+

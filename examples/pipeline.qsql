@@ -1,0 +1,39 @@
+-- A richer qsql example: a file source, a computed cell, and a duckdb-table sink.
+-- Run it (from this directory) with:  qsql run pipeline.qsql
+--
+-- Per-cell engines: a cell can target a different backend (needs the [bigquery]
+-- extra + credentials), e.g.
+--     -- @cell events
+--     /*@ input: { bigquery: { project: my-proj, dataset: analytics } } */
+--     SELECT user_id, event FROM analytics.events WHERE ts > CURRENT_DATE - 7;
+
+-- @engine: duckdb
+-- @output: { type: parquet, dir: data/ }
+-- @autorun: true
+
+/*@
+sources:
+  regions: { path: ./seeds/regions.csv }   # type inferred from the .csv extension
+*/
+
+-- @cell sales
+SELECT * FROM (VALUES
+    (1, 1,  120.0),
+    (2, 1,   80.0),
+    (3, 2,  200.0),
+    (4, 3,   50.0),
+    (5, 3,   75.0)
+) AS t(sale_id, region_id, amount);
+
+-- @cell by_region
+-- @depends_on: [sales]
+SELECT r.region, round(sum(s.amount), 2) AS total, count(*) AS n
+FROM {{ ref('sales') }} s
+JOIN {{ source('regions') }} r USING (region_id)
+GROUP BY r.region
+ORDER BY total DESC;
+
+-- @cell warehouse
+-- @depends_on: [by_region]
+-- @output: { type: duckdb, path: warehouse.db }
+SELECT * FROM {{ ref('by_region') }};
