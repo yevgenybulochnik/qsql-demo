@@ -21,8 +21,15 @@ class ExecResult:
 
 
 def as_subquery(sql: str) -> str:
-    """Normalize rendered SQL for embedding inside ``COPY (...)`` / ``CREATE ... AS (...)``."""
-    return sql.strip().rstrip(";").strip()
+    """Normalize rendered SQL for embedding inside ``COPY (...)`` / ``CREATE ... AS (...)``.
+
+    Drops trailing blank/comment-only lines and a trailing statement terminator so a
+    single-statement cell body wraps cleanly (mid-body ``;`` is still the user's error).
+    """
+    lines = sql.splitlines()
+    while lines and (not lines[-1].strip() or lines[-1].lstrip().startswith("--")):
+        lines.pop()
+    return "\n".join(lines).strip().rstrip(";").strip()
 
 
 class RunContext:
