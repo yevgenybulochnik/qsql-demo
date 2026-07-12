@@ -123,18 +123,18 @@ class Directive:
 
 
 class Executor(ABC):
-    """Base for an engine plugin: runs a cell's SQL on a backend."""
+    """Base for an engine plugin: runs a cell's SQL on a backend.
+
+    ``run`` returns an ``ExecResult`` (a DuckDB SELECT for the duckdb engine, or a
+    materialized Polars frame for other engines) that a sink then lands.
+    """
 
     name: str = ""
     reads_parquet: bool = False
 
     @abstractmethod
-    def connect(self, cfg: Any) -> Any:
-        """Open (or return a cached) connection for the given resolved config."""
-
-    @abstractmethod
-    def run(self, cell: RenderedCell, conn: Any) -> Any:
-        """Execute the cell and return a result relation DuckDB can consume."""
+    def run(self, cell: RenderedCell, ctx: Any) -> Any:
+        """Execute the cell and return an ExecResult."""
 
 
 class Sink(ABC):
@@ -143,14 +143,13 @@ class Sink(ABC):
     name: str = ""
     requires: list[str] = []  # duckdb extensions to LOAD (e.g. "postgres")
 
-    @abstractmethod
-    def prepare(self, cfg: Any, duck: Any) -> None:
-        """Set up the conduit DuckDB connection (ATTACH targets, LOAD extensions)."""
+    def prepare(self, config: Any, ctx: Any) -> None:
+        """Set up the conduit connection for this sink (ATTACH targets, schemas)."""
 
     @abstractmethod
-    def write(self, cell: RenderedCell, relation: Any, duck: Any) -> RunResult:
+    def write(self, cell: RenderedCell, result: Any, ctx: Any) -> RunResult:
         """Materialize the cell's result at the destination."""
 
     @abstractmethod
-    def ref_expr(self, cell: RenderedCell) -> str:
-        """A DuckDB-readable expression a downstream cell uses to read this output."""
+    def ref_expr(self, name: str, config: Any) -> str:
+        """A DuckDB-readable expression a downstream cell uses to read cell ``name``."""

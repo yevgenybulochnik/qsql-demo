@@ -16,21 +16,38 @@ from .graph import downstream, topo_sort
 from .models import RenderedCell
 from .parser import parse
 from .plugins import builtin as _builtin  # noqa: F401  (ensure directives registered)
-from .registry import DIRECTIVES, DirectiveRegistry
+from . import executors as _executors  # noqa: F401  (ensure executors registered)
+from . import sinks as _sinks  # noqa: F401  (ensure sinks registered)
+from . import sources as _sources  # noqa: F401  (ensure source readers registered)
+from .registry import DIRECTIVES, EXECUTORS, SINKS, DirectiveRegistry
 from .render import render_cell
 
 
 def _ref_expr_for(cfg: Any, name: str) -> str:
-    """How a downstream DuckDB cell reads cell ``name`` back, given its sink.
+    """How a downstream DuckDB cell reads cell ``name`` back, delegated to its sink."""
+    sink_type = resolve_sink(cfg)
+    sink_cls = SINKS.get(sink_type)
+    if sink_cls is None:
+        raise ConfigError(f"unknown sink type: {sink_type!r}")
+    return sink_cls().ref_expr(name, cfg)
 
-    Step 5 supports the default parquet sink; other sinks are wired via
-    ``Sink.ref_expr`` when sinks land (step 6).
+
+def _check_engine_guardrail(cells: dict[str, RenderedCell], deps: dict[str, set[str]]) -> None:
+    """Cells that read local parquet (ref/depends_on/source) must run on DuckDB.
+
+    Only enforced when the engine's executor is registered and cannot read parquet;
+    an unregistered engine is left to fail at run time (keeps compile/list working
+    without optional engines installed).
     """
-    sink = resolve_sink(cfg)
-    if sink != "parquet":
-        raise ConfigError(f"ref to a {sink!r}-sink cell is not supported yet")
-    out_dir = (getattr(cfg, "output", {}) or {}).get("dir", "data/")
-    return f"read_parquet('{out_dir.rstrip('/')}/{name}.parquet')"
+    for name, cell in cells.items():
+        executor_cls = EXECUTORS.get(cell.engine)
+        if executor_cls is None or executor_cls.reads_parquet:
+            continue
+        if deps.get(name) or cell.extensions:
+            raise ConfigError(
+                f"cell {name!r} runs on {cell.engine!r} but uses ref()/depends_on/source(); "
+                "cells that read local outputs must run on duckdb"
+            )
 
 
 class Project:
@@ -44,12 +61,14 @@ class Project:
         deps: dict[str, set[str]],
         order: list[str],
         names: list[str],
+        project_dir: str | Path | None = None,
     ) -> None:
         self.global_config = global_config
         self.cells = cells
         self._deps = deps
         self._order = order
         self._names = names
+        self.project_dir = Path(project_dir) if project_dir is not None else Path.cwd()
 
     # -- construction --------------------------------------------------------
 
@@ -60,6 +79,7 @@ class Project:
         *,
         overrides: dict[str, Any] | None = None,
         registry: DirectiveRegistry = DIRECTIVES,
+        project_dir: str | Path | None = None,
     ) -> "Project":
         overrides = overrides or {}
         blocks = parse(text)
@@ -97,9 +117,17 @@ class Project:
             )
             deps[block.name] = set(result.refs) | set(getattr(cfg, "depends_on", []) or [])
 
+        _check_engine_guardrail(cells, deps)
         order = topo_sort(deps)  # validates unknown deps + cycles
         names = [b.name for b in cell_blocks]
-        return cls(global_config=global_config, cells=cells, deps=deps, order=order, names=names)
+        return cls(
+            global_config=global_config,
+            cells=cells,
+            deps=deps,
+            order=order,
+            names=names,
+            project_dir=project_dir,
+        )
 
     @classmethod
     def from_file(
@@ -109,8 +137,19 @@ class Project:
         overrides: dict[str, Any] | None = None,
         registry: DirectiveRegistry = DIRECTIVES,
     ) -> "Project":
-        text = Path(path).read_text(encoding="utf-8")
-        return cls.from_text(text, overrides=overrides, registry=registry)
+        path = Path(path)
+        text = path.read_text(encoding="utf-8")
+        return cls.from_text(
+            text, overrides=overrides, registry=registry, project_dir=path.parent
+        )
+
+    # -- execution -----------------------------------------------------------
+
+    def run(self, select: Iterable[str] | None = None) -> list:
+        """Run the selected cells (default all) and return their RunResults."""
+        from .runner import run_project
+
+        return run_project(self, self.project_dir, select=list(select) if select else None)
 
     # -- queries -------------------------------------------------------------
 
