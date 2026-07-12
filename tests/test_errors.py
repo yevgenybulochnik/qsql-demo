@@ -10,12 +10,13 @@ from qsql_demo.errors import (
     ExecutorError,
     ParseError,
     QsqlError,
+    RenderError,
     SinkError,
 )
 
 
 @pytest.mark.parametrize(
-    "exc", [ParseError, ConfigError, CycleError, ExecutorError, SinkError]
+    "exc", [ParseError, ConfigError, RenderError, CycleError, ExecutorError, SinkError]
 )
 def test_errors_subclass_qsqlerror(exc: type[Exception]) -> None:
     assert issubclass(exc, QsqlError)

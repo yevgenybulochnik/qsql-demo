@@ -15,6 +15,10 @@ class ConfigError(QsqlError):
     """Raised when global/cell configuration is invalid or inconsistent."""
 
 
+class RenderError(QsqlError):
+    """Raised when a cell's SQL body fails to render (Jinja error, undefined var)."""
+
+
 class CycleError(QsqlError):
     """Raised when the cell dependency graph contains a cycle."""
 
