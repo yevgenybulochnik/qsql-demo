@@ -154,5 +154,14 @@ def watch(file: str = _FileArg, set_: Optional[list[str]] = _SetOpt) -> None:
         console.print("stopped")
 
 
+@app.command()
+def tui(file: str = _FileArg, set_: Optional[list[str]] = _SetOpt) -> None:
+    """Launch the interactive TUI (master-detail, VisiData-style data sheet)."""
+    from .tui import QsqlApp
+
+    project = _load(file, set_)
+    QsqlApp(project, file=file, overrides=collect(set_, os.environ)).run()
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
