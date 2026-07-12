@@ -16,3 +16,22 @@ import pytest
 def project_dir(tmp_path: Path) -> Path:
     """An isolated working directory for a qsql project under test."""
     return tmp_path
+
+
+@pytest.fixture
+def registries():
+    """Snapshot the global plugin registries so a test's registrations don't leak.
+
+    Ensures builtins are loaded, yields the directive registry, and restores all
+    four registries to their pre-test state afterwards.
+    """
+    import qsql_demo.plugins  # noqa: F401  (import triggers builtin registration)
+    from qsql_demo.registry import DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS
+
+    registries = (DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS)
+    snaps = [(r, r.snapshot()) for r in registries]
+    try:
+        yield DIRECTIVES
+    finally:
+        for reg, snap in snaps:
+            reg.restore(snap)
