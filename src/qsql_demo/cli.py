@@ -128,5 +128,31 @@ def run(
         raise typer.Exit(1)
 
 
+@app.command()
+def watch(file: str = _FileArg, set_: Optional[list[str]] = _SetOpt) -> None:
+    """Watch the file and re-run changed cells (and their downstream) on save."""
+    from .watcher import watch_file
+
+    overrides = collect(set_, os.environ)
+
+    def on_event(kind: str, names: list[str], payload: object) -> None:
+        if kind == "error":
+            console.print(f"[red]compile error:[/] {payload}")
+        elif not names:
+            console.print("[dim]no autorun cells to rebuild[/]")
+        else:
+            failed = [r.name for r in payload if not r.ok] if isinstance(payload, list) else []
+            mark = "[red]" if failed else "[green]"
+            console.print(f"{mark}ran[/] {', '.join(names)}" + (f"  (failed: {', '.join(failed)})" if failed else ""))
+
+    # surface an initial compile error cleanly
+    _load(file, set_)
+    console.print(f"[bold]watching {file}[/] — edit and save to rebuild (ctrl-c to stop)")
+    try:
+        watch_file(file, overrides=overrides, on_event=on_event)
+    except KeyboardInterrupt:
+        console.print("stopped")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
