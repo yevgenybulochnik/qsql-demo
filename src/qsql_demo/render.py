@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from jinja2 import Environment, StrictUndefined
 
-from .errors import RenderError
+from .errors import QsqlError, RenderError
 from .registry import SOURCE_READERS, SourceReaderRegistry
 from .sources import resolve_source
 
@@ -78,8 +78,8 @@ def render_cell(
     }
     try:
         sql = env.from_string(sql_raw).render(**context)
-    except RenderError:
-        raise
+    except QsqlError:
+        raise  # ConfigError/RenderError from ref()/source() propagate as-is
     except Exception as exc:  # jinja UndefinedError, TemplateSyntaxError, ...
         raise RenderError(f"failed to render cell {name!r}: {exc}") from exc
 
