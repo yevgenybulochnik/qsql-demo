@@ -1,7 +1,7 @@
 [project]
 name = "qsql-demo"
 version = "0.1.0"
-description = "Add your description here"
+description = "A notebook-like CLI for SQL: named cell blocks with comment-driven, pluggable config."
 readme = "README.md"
 authors = [
     { name = "Yevgeny Bulochnik", email = "yevgeny.bulochnik@gmail.com" }
@@ -9,6 +9,20 @@ authors = [
 requires-python = ">=3.12"
 dependencies = []
 
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers -m 'not (network or bigquery or postgres)'"
+markers = [
+    "network: test hits the network (e.g. installs a DuckDB extension); deselected by default",
+    "bigquery: test needs BigQuery credentials; deselected by default",
+    "postgres: test needs a running Postgres; deselected by default",
+]
