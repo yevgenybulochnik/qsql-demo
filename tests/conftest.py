@@ -25,7 +25,8 @@ def registries():
     Ensures builtins are loaded, yields the directive registry, and restores all
     four registries to their pre-test state afterwards.
     """
-    import qsql_demo.plugins  # noqa: F401  (import triggers builtin registration)
+    import qsql_demo.plugins  # noqa: F401  (import triggers directive registration)
+    import qsql_demo.sources  # noqa: F401  (import triggers source-reader registration)
     from qsql_demo.registry import DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS
 
     registries = (DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS)
