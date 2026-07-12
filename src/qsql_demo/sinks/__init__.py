@@ -4,3 +4,4 @@ from __future__ import annotations
 
 from . import duckdb_sink  # noqa: F401
 from . import parquet_sink  # noqa: F401
+from . import postgres_sink  # noqa: F401  (uses duckdb's postgres extension)
