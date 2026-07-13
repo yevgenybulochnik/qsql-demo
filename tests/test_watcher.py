@@ -43,6 +43,12 @@ def test_plan_rebuild_includes_downstream(project_dir: Path) -> None:
     assert plan_rebuild(p1, p2) == ["a", "b", "c"]
 
 
+def test_plan_rebuild_includes_new_cell(project_dir: Path) -> None:
+    p1 = _proj(project_dir, V1)
+    p2 = _proj(project_dir, V1 + "\n-- @cell d\nSELECT 42 AS n;\n")
+    assert plan_rebuild(p1, p2) == ["d"]
+
+
 def test_plan_rebuild_no_change_is_empty(project_dir: Path) -> None:
     p1 = _proj(project_dir, V1)
     p2 = _proj(project_dir, V1)
@@ -83,9 +89,10 @@ def test_watch_file_runs_initial_then_rebuilds_on_change(project_dir: Path, monk
     events: list[tuple[str, list[str]]] = []
 
     def fake_watch(path):
-        # simulate a save that changes cell `a`
-        Path(path).write_text(V1.replace("SELECT 1 AS n;", "SELECT 100 AS n;"))
-        yield {("modified", path)}
+        # watch_file watches the parent dir; simulate a save that changes cell `a`
+        file = Path(path) / "base.sql"
+        file.write_text(V1.replace("SELECT 1 AS n;", "SELECT 100 AS n;"))
+        yield {("modified", str(file)), ("modified", str(Path(path) / "unrelated.txt"))}
 
     monkeypatch.setattr("qsql_demo.watcher._watch", fake_watch)
     watch_file(

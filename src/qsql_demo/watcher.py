@@ -52,17 +52,21 @@ def watch_file(
     ``on_event(kind, names, payload)`` is called with kind in
     {``initial``, ``rebuild``, ``error``}.
     """
-    file = Path(file)
+    file = Path(file).resolve()
     project = Project.from_file(file, overrides=overrides)
     initial = [name for name in project.order() if _autorun(project.cell(name))]
     results = project.run(select=initial) if initial else []
     if on_event:
         on_event("initial", initial, results)
 
-    for _changes in _watch(str(file)):
+    # Watch the parent directory: editors that save via rename (vim/nvim)
+    # replace the inode, which kills a watch placed on the file itself.
+    for changes in _watch(str(file.parent)):
+        if not any(Path(path) == file for _, path in changes):
+            continue
         try:
             new = Project.from_file(file, overrides=overrides)
-        except QsqlError as exc:
+        except (QsqlError, OSError) as exc:
             if on_event:
                 on_event("error", [], exc)
             continue

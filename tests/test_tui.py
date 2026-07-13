@@ -76,6 +76,33 @@ def test_tui_survives_removed_current_cell(project_dir: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_tui_file_change_adds_new_cell_and_runs_it(project_dir: Path) -> None:
+    # regression: a saved file with a brand-new cell must show up in the cell
+    # list and be run (landing its parquet), without resetting the selection
+    file = project_dir / "base.sql"
+    file.write_text(PIPELINE)
+    app = QsqlApp(Project.from_file(file), file=file, enable_watch=False)
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("j")  # select active_users
+            await pilot.pause()
+            assert app.current == "active_users"
+
+            file.write_text(PIPELINE + "\n-- @cell hello\nSELECT 'hi' AS greeting;\n")
+            await app._apply_file_change()
+            await pilot.pause()
+
+            cells = app.query_one("#cells", DataTable)
+            assert cells.row_count == 3
+            assert app.results["hello"].ok
+            assert (project_dir / "data" / "hello.parquet").exists()
+            assert app.current == "active_users"  # selection survives the rebuild
+
+    asyncio.run(scenario())
+
+
 def test_tui_run_all_populates_results(project_dir: Path) -> None:
     (project_dir / "base.sql").write_text(PIPELINE)
     app = QsqlApp(Project.from_file(project_dir / "base.sql"), enable_watch=False)

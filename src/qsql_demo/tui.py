@@ -70,7 +70,9 @@ class QsqlApp(App):
     ) -> None:
         super().__init__()
         self.project = project
-        self.file = Path(file) if file else None
+        # resolve now: a run() chdir-ing in a worker thread must not re-point a
+        # relative path between watch events
+        self.file = Path(file).resolve() if file else None
         self.overrides = overrides or {}
         self.enable_watch = enable_watch and self.file is not None
         self.current: str | None = None
@@ -108,7 +110,8 @@ class QsqlApp(App):
     def _repopulate_cells(self) -> None:
         table = self.query_one("#cells", DataTable)
         table.clear()
-        for name in self.project.order():
+        order = self.project.order()
+        for name in order:
             cell = self.project.cell(name)
             result = self.results.get(name)
             rows = str(result.rows) if result and result.rows is not None else ""
@@ -119,6 +122,10 @@ class QsqlApp(App):
                 rows,
                 key=name,
             )
+        # clear() resets the cursor to row 0; without this the highlight event
+        # would silently re-select the first cell after every rebuild
+        if self.current in order:
+            table.move_cursor(row=order.index(self.current))
 
     def _reconcile_current(self) -> None:
         """Keep ``current`` valid after a recompile that may add/remove cells."""
@@ -272,17 +279,25 @@ class QsqlApp(App):
     async def _watch_worker(self) -> None:
         from watchfiles import awatch
 
-        async for _changes in awatch(str(self.file)):
-            try:
-                new = Project.from_file(self.file, overrides=self.overrides)
-            except QsqlError:
-                continue
-            names = plan_rebuild(self.project, new)
-            if names:
-                results = await asyncio.to_thread(new.run, names)
-                for result in results:
-                    self.results[result.name] = result
-            self.project = new
-            self._reconcile_current()
-            self._repopulate_cells()
-            self._refresh_detail()
+        # Watch the parent directory, not the file: editors that save via
+        # rename (vim/nvim backup writes) replace the inode, which kills a
+        # watch placed on the file itself after the first save.
+        async for changes in awatch(str(self.file.parent)):
+            if any(Path(path) == self.file for _, path in changes):
+                await self._apply_file_change()
+
+    async def _apply_file_change(self) -> None:
+        try:
+            new = Project.from_file(self.file, overrides=self.overrides)
+        except (QsqlError, OSError):
+            # invalid intermediate state or mid-save rename race; keep last good
+            return
+        names = plan_rebuild(self.project, new)
+        if names:
+            results = await asyncio.to_thread(new.run, names)
+            for result in results:
+                self.results[result.name] = result
+        self.project = new
+        self._reconcile_current()
+        self._repopulate_cells()
+        self._refresh_detail()
