@@ -1,5 +1,9 @@
+import os
+import queue
+import threading
+
 from qsql_demo.compiler import compile_file
-from qsql_demo.watcher import hashes_of, plan_rerun, run_changed
+from qsql_demo.watcher import hashes_of, plan_rerun, run_changed, touches, watch_events
 
 V1 = """\
 -- @cell a
@@ -44,6 +48,44 @@ def test_new_cell_counts_as_changed(tmp_path) -> None:
     hashes = hashes_of(project)
     f.write_text(V1 + "-- @cell e\nSELECT 5 AS w;\n")
     assert plan_rerun(hashes, compile_file(f)) == ["e"]
+
+
+def test_touches_filters_directory_events(tmp_path) -> None:
+    f = tmp_path / "base.sql"
+    f.write_text("x")
+    assert touches({(1, str(f))}, f)
+    assert not touches({(1, str(tmp_path / "base.sql.swp"))}, f)
+
+
+def test_watch_survives_atomic_replace_saves(tmp_path) -> None:
+    # editors like nvim save via write-temp + rename, replacing the inode;
+    # the watcher must keep firing across repeated saves
+    f = tmp_path / "base.sql"
+    f.write_text(V1)
+    events: queue.Queue = queue.Queue()
+    stop = threading.Event()
+
+    def consume() -> None:
+        for _project, results in watch_events(f, stop_event=stop):
+            events.put([r.cell for r in results] if isinstance(results, list) else results)
+
+    worker = threading.Thread(target=consume, daemon=True)
+    worker.start()
+    try:
+        assert events.get(timeout=20) == ["a", "b", "c"]  # initial autorun pass
+
+        def atomic_save(text: str) -> None:
+            tmp = tmp_path / ".base.sql.tmp"
+            tmp.write_text(text)
+            os.replace(tmp, f)
+
+        atomic_save(V1.replace("SELECT 1 AS x;", "SELECT 2 AS x;"))
+        assert events.get(timeout=20) == ["a", "b"]
+        atomic_save(V1.replace("SELECT 1 AS x;", "SELECT 3 AS x;"))
+        assert events.get(timeout=20) == ["a", "b"]  # still alive after inode swap
+    finally:
+        stop.set()
+        worker.join(timeout=10)
 
 
 def test_config_only_edits_do_not_trigger(tmp_path) -> None:

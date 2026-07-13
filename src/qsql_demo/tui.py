@@ -429,7 +429,13 @@ class QsqlApp(App):
     async def _watch_worker(self) -> None:
         import watchfiles
 
-        async for _ in watchfiles.awatch(self.path):
+        from .watcher import touches
+
+        # watch the directory: atomic editor saves (nvim) replace the inode,
+        # which silently kills a watch on the file path itself
+        async for changes in watchfiles.awatch(self.path.parent):
+            if not touches(changes, self.path):
+                continue
             try:
                 project = compile_file(self.path, self.overrides)
             except QsqlError as exc:

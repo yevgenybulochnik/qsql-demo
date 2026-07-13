@@ -20,6 +20,17 @@ def hashes_of(project: Project) -> dict[str, str]:
     return {name: cell.hash for name, cell in project.cells.items()}
 
 
+def touches(changes: set[tuple[Any, str]], path: Path) -> bool:
+    """True when a watchfiles change-set includes our file.
+
+    We watch the *parent directory*, not the file: editors that save atomically
+    (nvim, vim, ...) replace the file's inode on every write, and a watch on
+    the file path itself goes deaf after the first save.
+    """
+    target = str(path.resolve())
+    return any(str(Path(changed).resolve()) == target for _, changed in changes)
+
+
 def plan_rerun(old_hashes: dict[str, str], project: Project) -> list[str]:
     """Changed cells (new ones count) plus downstream, autorun:false filtered out."""
     changed = {n for n, c in project.cells.items() if old_hashes.get(n) != c.hash}
@@ -39,12 +50,14 @@ def run_changed(
 
 
 def watch_events(
-    path: Path | str, overrides: dict[str, Any] | None = None
+    path: Path | str,
+    overrides: dict[str, Any] | None = None,
+    stop_event: Any = None,
 ) -> Iterator[tuple[Project | None, list[RunResult] | QsqlError]]:
     """Initial full autorun pass, then one event per file save.
 
     Yields (project, results); on compile failure yields (None, error) and
-    keeps watching.
+    keeps watching. Pass a threading.Event as stop_event to end the loop.
     """
     import watchfiles
 
@@ -54,7 +67,9 @@ def watch_events(
     results = run_project(project, select=autorun, closure=False) if autorun else []
     yield project, results
     hashes = hashes_of(project)
-    for _ in watchfiles.watch(path):
+    for changes in watchfiles.watch(path.parent, stop_event=stop_event):
+        if not touches(changes, path):
+            continue
         try:
             project, results = run_changed(path, hashes, overrides)
         except QsqlError as exc:
