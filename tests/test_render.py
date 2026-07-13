@@ -1,0 +1,80 @@
+import pytest
+
+from qsql_demo.compiler import compile_text
+from qsql_demo.errors import ConfigError
+
+
+def test_ref_emits_producer_parquet_ref_expr_and_edge(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell users\nSELECT 1 AS id;\n"
+        "-- @cell active\nSELECT * FROM {{ ref('users') }};",
+        root=tmp_path,
+    )
+    active = project.cells["active"]
+    assert f"read_parquet('{tmp_path}/data/users.parquet')" in active.sql
+    assert active.depends_on == ["users"]
+
+
+def test_ref_uses_the_producers_own_sink(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell landed\n"
+        "-- @output: { type: duckdb, path: wh.db }\n"
+        "SELECT 1 AS id;\n"
+        "-- @cell reader\nSELECT * FROM {{ ref('landed') }};",
+        root=tmp_path,
+    )
+    sql = project.cells["reader"].sql
+    assert '."main"."landed"' in sql
+    assert "read_parquet" not in sql
+
+
+def test_ref_unknown_cell_raises(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="unknown cell"):
+        compile_text("-- @cell a\nSELECT * FROM {{ ref('ghost') }};", root=tmp_path)
+
+
+def test_named_source_resolves_reader_and_records_extension(tmp_path) -> None:
+    project = compile_text(
+        "/*@\nsources:\n  sales: { path: data/sales.xlsx, sheet: Q1 }\n*/\n"
+        "-- @cell q1\nSELECT * FROM {{ source('sales') }};",
+        root=tmp_path,
+    )
+    q1 = project.cells["q1"]
+    assert f"read_xlsx('{tmp_path}/data/sales.xlsx', sheet='Q1')" in q1.sql
+    assert "excel" in q1.extensions
+    assert q1.uses_sources
+
+
+def test_inline_path_source(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell users\nSELECT * FROM {{ source('seeds/users.csv') }};",
+        root=tmp_path,
+    )
+    assert f"read_csv_auto('{tmp_path}/seeds/users.csv')" in project.cells["users"].sql
+
+
+def test_var_and_env(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("QSQL_TEST_TOKEN", "sekret")
+    project = compile_text(
+        "-- @vars: { data_dir: ./seeds }\n"
+        "-- @cell a\nSELECT '{{ var(\"data_dir\") }}' AS d, '{{ env(\"QSQL_TEST_TOKEN\") }}' AS t,"
+        " {{ var('missing', 42) }} AS fallback;",
+        root=tmp_path,
+    )
+    sql = project.cells["a"].sql
+    assert "'./seeds' AS d" in sql
+    assert "'sekret' AS t" in sql
+    assert "42 AS fallback" in sql
+
+
+def test_var_missing_without_default_raises(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="undefined var"):
+        compile_text("-- @cell a\nSELECT {{ var('nope') }};", root=tmp_path)
+
+
+def test_jinja_only_touches_sql_not_config(tmp_path) -> None:
+    project = compile_text(
+        '-- @vars: { greeting: "{{ not rendered }}" }\n-- @cell a\nSELECT 1;',
+        root=tmp_path,
+    )
+    assert project.config.vars["greeting"] == "{{ not rendered }}"

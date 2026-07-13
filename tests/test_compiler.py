@@ -1,0 +1,96 @@
+import pytest
+
+from qsql_demo.compiler import compile_text
+from qsql_demo.errors import ConfigError
+
+PIPELINE = """\
+-- @engine: duckdb
+-- @vars: { n: 3 }
+
+-- @cell users
+SELECT * FROM range({{ var('n') }}) t(user_id);
+
+-- @cell events
+SELECT range AS user_id, 'click' AS event FROM range(2);
+
+-- @cell active
+-- @depends_on: [events]
+SELECT u.user_id FROM {{ ref('users') }} u;
+"""
+
+
+def test_project_topo_order_and_edges(tmp_path) -> None:
+    project = compile_text(PIPELINE, root=tmp_path)
+    assert project.order == ["users", "events", "active"]
+    assert project.cells["active"].depends_on == ["events", "users"]
+
+
+def test_engine_resolution_explicit_and_inferred(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell a\n-- @engine: sqlite\nSELECT 1 AS x;\n"
+        "-- @cell b\n/*@ input: { sqlite: db.db } */\nSELECT 2 AS x;\n"
+        "-- @cell c\nSELECT 3 AS x;",
+        root=tmp_path,
+    )
+    assert project.cells["a"].engine == "sqlite"
+    assert project.cells["b"].engine == "sqlite"
+    assert project.cells["c"].engine == "duckdb"
+
+
+def test_depends_on_unknown_cell_raises(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="unknown cell"):
+        compile_text("-- @cell a\n-- @depends_on: [ghost]\nSELECT 1;", root=tmp_path)
+
+
+def test_non_duckdb_cell_with_ref_trips_guardrail(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="must run on duckdb"):
+        compile_text(
+            "-- @cell a\nSELECT 1 AS x;\n"
+            "-- @cell b\n-- @engine: sqlite\nSELECT * FROM {{ ref('a') }};",
+            root=tmp_path,
+        )
+
+
+def test_non_duckdb_cell_with_source_trips_guardrail(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="must run on duckdb"):
+        compile_text(
+            "-- @cell a\n-- @engine: sqlite\nSELECT * FROM {{ source('x.csv') }};",
+            root=tmp_path,
+        )
+
+
+def test_extensions_directive_trips_guardrail_on_non_duckdb_cell(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="must run on duckdb"):
+        compile_text(
+            "-- @cell a\n-- @engine: sqlite\n-- @extensions: [excel]\nSELECT 1;",
+            root=tmp_path,
+        )
+
+
+def test_extensions_union_config_and_render_collected(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell a\n-- @extensions: [spatial]\nSELECT * FROM {{ source('s.xlsx') }};",
+        root=tmp_path,
+    )
+    assert set(project.cells["a"].extensions) == {"spatial", "excel"}
+
+
+def test_cycle_reported(tmp_path) -> None:
+    from qsql_demo.errors import CycleError
+
+    with pytest.raises(CycleError):
+        compile_text(
+            "-- @cell a\nSELECT * FROM {{ ref('b') }};\n"
+            "-- @cell b\nSELECT * FROM {{ ref('a') }};",
+            root=tmp_path,
+        )
+
+
+def test_global_config_reaches_cells_and_overrides_apply(tmp_path) -> None:
+    project = compile_text(
+        "-- @autorun: false\n-- @cell a\nSELECT 1;",
+        root=tmp_path,
+        overrides={"autorun": True},
+    )
+    assert project.cells["a"].config.autorun is True
+    assert project.config.autorun is True
