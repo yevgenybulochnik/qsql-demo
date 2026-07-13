@@ -18,9 +18,14 @@ YAML — line form `-- @key: value` and block form `/*@ ... */`. Everything befo
 - **DuckDB is the universal conduit.** Any cell that uses `ref()`/`source()`/`@depends_on` must
   run on DuckDB (compile-time guardrail). Non-DuckDB engines extract to Polars; DuckDB writes
   that into whatever sink the cell chose.
-- **Everything is a plugin.** `@directive`, `@executor`, `@source_reader`, and `@sink` decorators
-  (`registry.py`) self-register at import time; `config.build_models()` assembles the registered
-  directives into the `GlobalConfig`/`CellConfig` pydantic models via `create_model()`.
+- **Everything is a plugin.** `@plugin`, `@executor`, `@source_reader`, and `@sink` decorators
+  (`registry.py`) self-register at import time. A `Plugin` (`plugins/base.py`) bundles a pydantic
+  `Config` — its fields become config directives, with real validators — plus an optional `run`
+  hook that wraps cell execution in a priority-ordered decorator chain (lower = outermore).
+  `config.build_models()` composes the registered Configs into `GlobalConfig`/`CellConfig` via
+  multiple-inheritance `create_model()`. Executors/sinks/source readers stay selected strategies,
+  not decorators; compile-time behavior (render globals, edges, engine/sink resolution) stays
+  core. See `docs/plugin-authoring.md`.
 - **Config resolution** merges global → cell → run overrides (`--set k.v=x`, `QSQL_*` env), with
   a per-directive merge strategy (override / deep-dict / list-extend). Directive values are
   literal YAML; Jinja applies to SQL bodies only.
@@ -43,11 +48,12 @@ YAML — line form `-- @key: value` and block form `/*@ ... */`. Everything befo
 Pipeline: `parser` → `config` → `render` → `graph` → `compiler` (produces `Project`) → `runner`.
 
 - `parser.py` — text → `[RawBlock]`: header + cells, directives as one YAML dict, body hash
-- `registry.py` / `plugins/builtin.py` — plugin registries + the builtin directives
-- `config.py` — dynamic pydantic models, merge/override resolution, engine + sink resolution
+- `registry.py` / `plugins/base.py` / `plugins/builtin.py` — registries + Plugin base + builtins
+- `config.py` — plugin-Config composition, merge/override resolution, engine + sink resolution
 - `render.py` — Jinja over SQL bodies; `ref()`/`source()`/`var()`/`env()` globals
 - `graph.py` — topo sort, cycle detection, `downstream()` (the watch rebuild set)
-- `runner.py` — topo execution over one conduit DuckDB connection; ATTACHes upstream sinks
+- `runner.py` — topo execution over one conduit DuckDB connection; wraps each cell in the plugin
+  decorator chain, ATTACHes upstream sinks
 - `executors/`, `sinks/`, `sources.py` — engine, output, and file-reader plugins
 - `watcher.py` — pure rebuild planning (`changed_cells`/`plan_rebuild`) + the watchfiles loop
 - `tui.py` — Textual master-detail app; `sheet.py` — pure VisiData-style ops over a Polars frame

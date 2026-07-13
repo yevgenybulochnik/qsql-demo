@@ -69,19 +69,34 @@ Environment/per-run values come from the override layer: `--set output.dir=out` 
 
 ## Extending it
 
-Four decorators register plugins; directives are assembled into the pydantic config
-models at runtime:
+Four decorators register plugins. A `@plugin` bundles a config directive (a pydantic
+`Config` with real validators, composed into the runtime config models) and may wrap
+cell execution in the runner's decorator chain:
 
 ```python
-from qsql_demo.registry import directive, source_reader, executor, sink
-from qsql_demo.models import Directive, Scope, Merge
+from pydantic import BaseModel
+from qsql_demo.plugins.base import Plugin, qfield
+from qsql_demo.registry import plugin  # also: source_reader, executor, sink
 
-@directive
-class Retries(Directive):
-    key = "retries"; scope = Scope.BOTH; annotation = int; default = 0
+@plugin
+class Retries(Plugin):
+    name = "retries"
+
+    class Config(BaseModel):
+        retries: int = qfield(0, ge=0)       # adds the @retries directive
+
+    def run(self, cell, ctx, inner):         # optional: decorate execution
+        result = inner(cell, ctx)
+        for _ in range(cell.config.retries):
+            if result.ok:
+                break
+            result = inner(cell, ctx)
+        return result
 ```
 
-See `plugins/builtin.py`, `sources.py`, `executors/`, and `sinks/` for the builtins.
+See `docs/plugin-authoring.md` for the full guide, and `plugins/builtin.py`,
+`sources.py`, `executors/`, `sinks/` for the builtins (e.g. `@render_dir` emits each
+cell's rendered SQL to a directory — try `--set render_dir=build/sql`).
 
 ## Development
 
