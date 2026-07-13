@@ -1,0 +1,200 @@
+"""The qsql CLI: init / run / watch / tui / list / show / compile."""
+
+from __future__ import annotations
+
+import hashlib
+import importlib
+import importlib.util
+import sys
+from pathlib import Path
+from typing import Optional
+
+import typer
+
+from .bootstrap import load_builtins
+from .compiler import Project, compile_file
+from .errors import QsqlError
+from .overrides import gather_overrides
+from .runner import run_project
+from .scaffold import write_scaffold
+
+app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=False,
+    invoke_without_command=True,
+    help="qsql — a notebook for SQL: one file, named cells, comment directives.",
+)
+
+FILE_ARG = typer.Argument(Path("base.sql"), help="The .qsql/.sql notebook file")
+SET_OPT = typer.Option(None, "--set", help="Override config: key.path=value (repeatable)")
+PLUGINS_OPT = typer.Option(
+    None, "--plugins", help="Extra plugin module (dotted name or path/to/file.py, repeatable)"
+)
+
+
+@app.callback()
+def main(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        _init(Path("base.sql"))
+
+
+@app.command()
+def init(file: Path = FILE_ARG) -> None:
+    """Scaffold a starter notebook (refuses to overwrite)."""
+    _init(file)
+
+
+def _init(file: Path) -> None:
+    try:
+        write_scaffold(file)
+    except FileExistsError:
+        typer.secho(f"refusing to overwrite existing {file}", fg="red")
+        raise typer.Exit(1)
+    typer.echo(f"scaffolded {file} — try: qsql run {file}")
+
+
+def _load_plugin_module(spec: str) -> None:
+    if spec.endswith(".py"):
+        path = Path(spec).resolve()
+        name = f"qsql_user_{path.stem}_{hashlib.sha1(str(path).encode()).hexdigest()[:8]}"
+        if name in sys.modules:
+            return
+        mod_spec = importlib.util.spec_from_file_location(name, path)
+        if mod_spec is None or mod_spec.loader is None:
+            raise QsqlError(f"cannot load plugin module {spec!r}")
+        module = importlib.util.module_from_spec(mod_spec)
+        sys.modules[name] = module
+        mod_spec.loader.exec_module(module)
+    else:
+        importlib.import_module(spec)
+
+
+def _project(file: Path, sets: list[str] | None, plugins: list[str] | None) -> Project:
+    load_builtins()
+    try:
+        rc = file.parent / "qsqlrc.py"
+        if rc.exists():
+            _load_plugin_module(str(rc))
+        for spec in plugins or []:
+            _load_plugin_module(spec)
+        return compile_file(file, overrides=gather_overrides(list(sets or [])))
+    except QsqlError as exc:
+        typer.secho(str(exc), fg="red")
+        raise typer.Exit(1)
+
+
+def _print_results(results: list) -> bool:
+    failed = False
+    for r in results:
+        if r.ok:
+            typer.secho(
+                f"  ok {r.cell:<24} {r.rows if r.rows is not None else '?':>8} rows"
+                f"  {r.elapsed * 1000:8.1f} ms  -> {r.target}",
+                fg="green",
+            )
+        else:
+            failed = True
+            reason = (r.error or "unknown error").strip().splitlines()[-1]
+            typer.secho(f"  FAIL {r.cell}: {reason}", fg="red")
+    return failed
+
+
+@app.command()
+def run(
+    file: Path = FILE_ARG,
+    select: Optional[list[str]] = typer.Option(None, "--select", "-s", help="Run these cells (+ upstreams)"),
+    set_: Optional[list[str]] = SET_OPT,
+    plugins: Optional[list[str]] = PLUGINS_OPT,
+) -> None:
+    """Compile and run cells in dependency order, landing each via its sink."""
+    project = _project(file, set_, plugins)
+    try:
+        results = run_project(project, select=list(select) if select else None)
+    except QsqlError as exc:
+        typer.secho(str(exc), fg="red")
+        raise typer.Exit(1)
+    if _print_results(results):
+        raise typer.Exit(1)
+
+
+@app.command("list")
+def list_cells(
+    file: Path = FILE_ARG,
+    set_: Optional[list[str]] = SET_OPT,
+    plugins: Optional[list[str]] = PLUGINS_OPT,
+) -> None:
+    """Cells in topo order with engine, sink, autorun, and dependencies."""
+    project = _project(file, set_, plugins)
+    for name in project.order:
+        cell = project.cells[name]
+        auto = "on" if cell.config.autorun else "off"
+        deps = ", ".join(cell.depends_on) or "-"
+        typer.echo(
+            f"{name:<26} {cell.engine:>8} -> {cell.sink_type:<8} autorun:{auto}  deps: {deps}"
+        )
+
+
+@app.command()
+def show(
+    cell: str,
+    file: Path = FILE_ARG,
+    set_: Optional[list[str]] = SET_OPT,
+    plugins: Optional[list[str]] = PLUGINS_OPT,
+) -> None:
+    """Print one cell's rendered SQL."""
+    project = _project(file, set_, plugins)
+    if cell not in project.cells:
+        typer.secho(f"unknown cell: {cell}", fg="red")
+        raise typer.Exit(1)
+    typer.echo(project.cells[cell].sql)
+
+
+@app.command("compile")
+def compile_cmd(
+    file: Path = FILE_ARG,
+    select: Optional[list[str]] = typer.Option(None, "--select", "-s"),
+    set_: Optional[list[str]] = SET_OPT,
+    plugins: Optional[list[str]] = PLUGINS_OPT,
+) -> None:
+    """Print rendered SQL for all (or selected) cells."""
+    project = _project(file, set_, plugins)
+    for name in project.order:
+        if select and name not in select:
+            continue
+        typer.echo(f"-- cell: {name}")
+        typer.echo(project.cells[name].sql.strip())
+        typer.echo("")
+
+
+@app.command()
+def watch(
+    file: Path = FILE_ARG,
+    set_: Optional[list[str]] = SET_OPT,
+    plugins: Optional[list[str]] = PLUGINS_OPT,
+) -> None:
+    """Re-run changed cells (+ downstream dependents) on every save."""
+    from .watcher import watch_events
+
+    _project(file, set_, plugins)  # load plugins + fail fast on compile errors
+    typer.echo(f"watching {file} — Ctrl+C to stop")
+    try:
+        for project, event in watch_events(file, overrides=gather_overrides(list(set_ or []))):
+            if project is None:
+                typer.secho(f"  compile error: {event}", fg="red")
+            elif event:
+                _print_results(event)
+    except KeyboardInterrupt:
+        pass
+
+
+@app.command()
+def tui(
+    file: Path = FILE_ARG,
+    set_: Optional[list[str]] = SET_OPT,
+    plugins: Optional[list[str]] = PLUGINS_OPT,
+) -> None:
+    """Open the interactive TUI (VisiData-style keys, reflect-only)."""
+    _project(file, set_, plugins)  # load plugins + fail fast on compile errors
+    from .tui import QsqlApp
+
+    QsqlApp(path=file, overrides=gather_overrides(list(set_ or []))).run()

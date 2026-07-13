@@ -49,21 +49,21 @@ def _conduit(project: Project) -> Any:
     return duckdb.connect(str(project.root / path) if path else ":memory:")
 
 
-def _selection(project: Project, select: list[str] | None) -> list[str]:
-    if not select:
+def _selection(project: Project, select: list[str] | None, closure: bool) -> list[str]:
+    if select is None:
         return list(project.order)
     unknown = [s for s in select if s not in project.cells]
     if unknown:
         from .errors import ConfigError
 
         raise ConfigError(f"unknown cell(s) in --select: {', '.join(unknown)}")
-    wanted: set[str] = set()
-    stack = list(select)
-    while stack:  # selected cells plus their upstream closure
-        name = stack.pop()
-        if name not in wanted:
+    wanted: set[str] = set(select)
+    if closure:  # selected cells plus their upstream closure
+        stack = list(select)
+        while stack:
+            name = stack.pop()
             wanted.add(name)
-            stack.extend(project.cells[name].depends_on)
+            stack.extend(u for u in project.cells[name].depends_on if u not in wanted)
     return [n for n in project.order if n in wanted]
 
 
@@ -119,7 +119,9 @@ def _wrap(plug: Any, inner: Inner) -> Inner:
     return wrapped
 
 
-def run_project(project: Project, select: list[str] | None = None) -> list[RunResult]:
+def run_project(
+    project: Project, select: list[str] | None = None, closure: bool = True
+) -> list[RunResult]:
     conn = _conduit(project)
     ctx = RunContext(
         conn=conn, root=project.root, overrides=project.overrides, config=project.config
@@ -127,7 +129,7 @@ def run_project(project: Project, select: list[str] | None = None) -> list[RunRe
     chain = build_chain(project)
     results: list[RunResult] = []
     try:
-        for name in _selection(project, select):
+        for name in _selection(project, select, closure):
             cell = project.cells[name]
             try:
                 result = chain(cell, ctx)
