@@ -1,6 +1,6 @@
 """VisiData-style Textual TUI: master-detail over a qsql project, reflect-only.
 
-Left: the cell list (engine -> sink, autorun, status, rows). Right: tabs for
+Top: the cell list (engine -> sink, autorun, status, rows). Below: tabs for
 SQL (t toggles raw/rendered), Data (a stack of Polars Sheets with vim keys),
 Config, and Log. The file is edited in your own editor; a background watcher
 recompiles on save and reruns autorun cells. The TUI never writes the file.
@@ -23,7 +23,7 @@ from rich.syntax import Syntax
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static, TabbedContent, TabPane
 
 from .compiler import Project, compile_file
@@ -38,7 +38,7 @@ class QsqlApp(App):
     TITLE = "qsql"
 
     CSS = """
-    #cells { width: 44%; border: solid $primary; }
+    #cells { height: 40%; max-height: 12; border: solid $primary; }
     #detail { border: solid $secondary; }
     #search { dock: bottom; display: none; }
     #sql_view, #config_view { padding: 1; }
@@ -88,7 +88,7 @@ class QsqlApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
+        with Vertical():
             yield DataTable(id="cells", cursor_type="row")
             with TabbedContent(id="detail"):
                 with TabPane("SQL", id="tab_sql"):
