@@ -39,7 +39,7 @@ class QsqlApp(App):
 
     CSS = """
     #cells { height: 40%; max-height: 12; border: solid $primary; }
-    #detail { border: solid $secondary; }
+    #detail { height: 1fr; border: solid $secondary; }
     #search { dock: bottom; display: none; }
     #sql_view, #config_view { padding: 1; }
     """
@@ -378,6 +378,20 @@ class QsqlApp(App):
                 if needle.lower() in names[idx].lower():
                     table.move_cursor(row=idx)
                     break
+            self._refresh_detail()
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """Clicking straight onto a tab must behave like navigating there."""
+        active = self.query_one(TabbedContent).active
+        if active == "tab_data":
+            self.mode = "data"
+            if not self.sheet_stack and self.current_cell:
+                self._push_sheet(
+                    Sheet(self._preview_frame(self.current_cell), title=self.current_cell)
+                )
+        else:
+            self.mode = "cells"
+            self.sheet_stack = []
             self._refresh_detail()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:

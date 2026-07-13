@@ -17,7 +17,6 @@ SELECT * FROM (VALUES
     (2, 'bob', false),
     (3, 'cyd', true),
     (4, 'bla', true),
-    (5, 'bla', true)
 ) AS t(user_id, name, active);
 
 -- @cell events

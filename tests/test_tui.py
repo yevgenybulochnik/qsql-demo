@@ -1,5 +1,5 @@
 import pytest
-from textual.widgets import DataTable
+from textual.widgets import DataTable, TabbedContent
 
 from qsql_demo.scaffold import write_scaffold
 from qsql_demo.tui import QsqlApp
@@ -34,6 +34,34 @@ async def test_toggle_raw_rendered_and_autorun(notebook) -> None:
         assert "users" not in app.autorun_off
         await pilot.press("A")
         assert app.autorun_global is False
+
+
+async def test_activating_data_tab_loads_current_cell_sheet(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        tabs = app.query_one(TabbedContent)
+        tabs.active = "tab_data"  # click the tab instead of pressing Enter
+        await pilot.pause()
+        assert app.mode == "data"
+        assert app.sheet_stack and app.sheet_stack[-1].title == "users"
+        assert app.query_one("#data", DataTable).row_count > 0
+        tabs.active = "tab_sql"  # leaving Data returns to cells mode
+        await pilot.pause()
+        assert app.mode == "cells"
+        assert not app.sheet_stack
+
+
+async def test_detail_pane_fills_remaining_height(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        detail = app.query_one("#detail")
+        cells = app.query_one("#cells")
+        assert cells.region.height <= 12
+        assert detail.region.height >= 20  # fills the rest, never collapses
 
 
 async def test_run_all_populates_results_and_dive(notebook) -> None:
