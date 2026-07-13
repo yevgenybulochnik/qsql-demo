@@ -67,3 +67,15 @@ def test_from_file(tmp_path) -> None:
     path.write_text(SAMPLE)
     proj = Project.from_file(path)
     assert proj.order() == ["users", "active"]
+
+
+def test_config_extensions_reach_rendered_cell() -> None:
+    text = "-- @cell a\n-- @extensions: [icu]\nSELECT 1 AS n;\n"
+    proj = Project.from_text(text)
+    assert "icu" in proj.cell("a").extensions
+
+
+def test_non_duckdb_cell_with_config_extensions_trips_guardrail() -> None:
+    text = "-- @cell a\n-- @engine: sqlite\n-- @extensions: [icu]\nSELECT 1 AS n;\n"
+    with pytest.raises(ConfigError):
+        Project.from_text(text)
