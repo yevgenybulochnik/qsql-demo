@@ -29,9 +29,9 @@ def registries():
     import qsql_demo.plugins  # noqa: F401  (import triggers directive registration)
     import qsql_demo.sinks  # noqa: F401  (import triggers sink registration)
     import qsql_demo.sources  # noqa: F401  (import triggers source-reader registration)
-    from qsql_demo.registry import DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS
+    from qsql_demo.registry import DIRECTIVES, EXECUTORS, PLUGINS, SINKS, SOURCE_READERS
 
-    registries = (DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS)
+    registries = (PLUGINS, DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS)
     snaps = [(r, r.snapshot()) for r in registries]
     try:
         yield DIRECTIVES
