@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from qsql_demo.config import (
     build_models,
@@ -11,6 +12,9 @@ from qsql_demo.config import (
     resolve_sink,
 )
 from qsql_demo.errors import ConfigError
+from qsql_demo.models import Scope
+from qsql_demo.plugins.base import Plugin, qfield
+from qsql_demo.registry import PluginRegistry
 
 
 def test_cellconfig_defaults() -> None:
@@ -82,3 +86,27 @@ def test_unknown_directive_raises() -> None:
 def test_cell_only_directive_in_header_raises() -> None:
     with pytest.raises(ConfigError):
         resolve_cell({"depends_on": ["a"]}, {}, {})
+
+
+def test_unknown_sink_type_rejected_at_resolution() -> None:
+    with pytest.raises(ConfigError, match="unknown sink type"):
+        resolve_cell({}, {"output": {"type": "bogus"}}, {})
+
+
+def test_build_models_composes_plugin_configs_with_validators() -> None:
+    reg = PluginRegistry()
+
+    class Retries(Plugin):
+        name = "retries"
+        scope = Scope.BOTH
+
+        class Config(BaseModel):
+            retries: int = qfield(0, ge=0)
+
+    reg.register(Retries)
+    _, Cell = build_models(reg)
+    assert Cell(retries=2).retries == 2
+    with pytest.raises(ValidationError):
+        Cell(retries=-1)
+    with pytest.raises(ValidationError):
+        Cell(bogus=1)  # extra="forbid" still applies
