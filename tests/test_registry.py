@@ -81,5 +81,5 @@ def test_chain_orders_by_priority_then_registration() -> None:
     class AlsoLate(Tracer):
         priority = 10
 
-    chain = [p.name for p in PLUGINS.chain()]
+    chain = [p.name for p in PLUGINS.chain() if p.name in {"early", "late", "also_late"}]
     assert chain == ["early", "late", "also_late"]

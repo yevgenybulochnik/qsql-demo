@@ -127,16 +127,16 @@ def test_third_party_config_plugin_extends_models() -> None:
 def test_override_keys_scoped_to_target_model() -> None:
     # global-only override keys are dropped when resolving cells, not errors
     @plugin
-    class Renderish(Plugin):
+    class Auditish(Plugin):
         scope = Scope.GLOBAL
 
         class Config(BaseModel):
-            render_dir: str | None = qfield(None)
+            audit_dir: str | None = qfield(None)
 
-    g = resolve_global({}, overrides={"render_dir": "build/"})
-    assert g.render_dir == "build/"
-    c = resolve_cell({}, {}, overrides={"render_dir": "build/"})
-    assert not hasattr(c, "render_dir")
+    g = resolve_global({}, overrides={"audit_dir": "build/"})
+    assert g.audit_dir == "build/"
+    c = resolve_cell({}, {}, overrides={"audit_dir": "build/"})
+    assert not hasattr(c, "audit_dir")
 
 
 def test_unknown_override_key_raises() -> None:
