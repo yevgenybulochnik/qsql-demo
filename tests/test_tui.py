@@ -59,6 +59,20 @@ def test_tui_mounts_and_reacts_to_keys(project_dir: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_tui_layout_stacks_cells_above_detail(project_dir: Path) -> None:
+    app = QsqlApp(_project(project_dir), enable_watch=False)
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            cells = app.query_one("#cells")
+            detail = app.query_one("#detail")
+            assert cells.region.x == detail.region.x  # both span from the left edge
+            assert detail.region.y >= cells.region.bottom  # detail sits below the cell list
+
+    asyncio.run(scenario())
+
+
 def test_tui_survives_removed_current_cell(project_dir: Path) -> None:
     # regression: deleting the selected cell then recompiling must not crash the UI
     (project_dir / "base.sql").write_text(PIPELINE)
