@@ -16,16 +16,26 @@ from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 from .errors import ConfigError
 from .models import Merge, Scope
 from .plugins import builtin as _builtin  # noqa: F401  (ensures builtins registered)
+from .plugins.base import EmptyConfig
 from .registry import PLUGINS, PluginRegistry
 from .util import deep_merge
 
 _MODEL_CONFIG = ConfigDict(extra="forbid")
 
 
+def _config_bases(plugins: list) -> tuple:
+    """Unique Config bases in registration order (config-less plugins contribute nothing)."""
+    bases: list[type[BaseModel]] = []
+    for p in plugins:
+        if p.Config is not EmptyConfig and p.Config not in bases:
+            bases.append(p.Config)
+    return tuple(bases) or (BaseModel,)
+
+
 def build_models(registry: PluginRegistry = PLUGINS):
     """Return ``(GlobalConfig, CellConfig)`` composed from the registered plugins."""
-    global_bases = tuple(p.Config for p in registry.by_scope(Scope.GLOBAL, Scope.BOTH)) or (BaseModel,)
-    cell_bases = tuple(p.Config for p in registry.by_scope(Scope.CELL, Scope.BOTH)) or (BaseModel,)
+    global_bases = _config_bases(registry.by_scope(Scope.GLOBAL, Scope.BOTH))
+    cell_bases = _config_bases(registry.by_scope(Scope.CELL, Scope.BOTH))
     GlobalConfig = create_model("GlobalConfig", __base__=global_bases, __config__=_MODEL_CONFIG)
     CellConfig = create_model("CellConfig", __base__=cell_bases, __config__=_MODEL_CONFIG)
     return GlobalConfig, CellConfig

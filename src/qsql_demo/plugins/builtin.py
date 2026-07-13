@@ -8,6 +8,7 @@ merges with the inherited global one.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, field_validator
@@ -107,3 +108,26 @@ class Tags(Plugin):
 
     class Config(BaseModel):
         tags: list[str] = qfield([], merge=Merge.EXTEND)
+
+
+@plugin
+class EmitSql(Plugin):
+    """Write each cell's rendered SQL to ``@render_dir`` before running it.
+
+    Relative dirs land under the project dir (the runner chdirs there for the run).
+    """
+
+    name = "emit_sql"
+    scope = Scope.BOTH
+    priority = 50
+
+    class Config(BaseModel):
+        render_dir: str | None = None
+
+    def run(self, cell: Any, ctx: Any, inner: Any) -> Any:
+        render_dir = getattr(cell.config, "render_dir", None)
+        if render_dir:
+            out = Path(render_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"{cell.name}.sql").write_text(cell.sql, encoding="utf-8")
+        return inner(cell, ctx)

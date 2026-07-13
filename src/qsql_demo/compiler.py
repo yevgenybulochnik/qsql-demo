@@ -104,6 +104,8 @@ class Project:
             result = render_cell(
                 name=block.name, sql_raw=block.sql, config=cfg, ref_resolver=ref_resolver
             )
+            config_exts = list(getattr(cfg, "extensions", []) or [])
+            extensions = config_exts + [e for e in result.extensions if e not in config_exts]
             cells[block.name] = RenderedCell(
                 name=block.name,
                 config=cfg,
@@ -112,7 +114,7 @@ class Project:
                 engine=resolve_engine(cfg),
                 sink=resolve_sink(cfg),
                 refs=result.refs,
-                extensions=result.extensions,
+                extensions=extensions,
                 hash=block.hash,
             )
             deps[block.name] = set(result.refs) | set(getattr(cfg, "depends_on", []) or [])

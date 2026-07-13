@@ -60,6 +60,16 @@ class PluginRegistry:
         name = self._fields.get(field)
         return self._items.get(name) if name else None
 
+    def run_plugins(self) -> "list[type[Plugin]]":
+        """Plugins that override ``run``, sorted by (priority, registration order).
+
+        Lower priority wraps outermore in the runner's decorator chain.
+        """
+        from .plugins.base import Plugin as _Base  # lazy: avoids a cycle through plugins/__init__
+
+        hooks = [p for p in self._items.values() if p.run is not _Base.run]
+        return sorted(hooks, key=lambda p: p.priority)
+
     def field_merge(self, field: str) -> Merge:
         """The merge strategy declared on config field ``field`` (default OVERRIDE)."""
         owner = self.field_owner(field)
