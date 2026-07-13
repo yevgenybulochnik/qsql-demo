@@ -5,9 +5,11 @@ SQL (t toggles raw/rendered), Data (a stack of Polars Sheets with vim keys),
 Config, and Log. The file is edited in your own editor; a background watcher
 recompiles on save and reruns autorun cells. The TUI never writes the file.
 
-Keys: j/k/h/l move . gg/G top/bottom . Enter dive . [ ] sort . - hide col .
-s/gs select . F frequency . I describe . / search, n/N next/prev . t raw/rendered .
-a/A cell/global autorun . r/R run cell/all . V open in real VisiData . q pop/quit
+Keys: j/k cell rows . h/l cycle detail tabs . gg/G top/bottom . Enter dive into
+the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
+- hide col . s/gs select . F frequency . I describe . / search, n/N next/prev .
+t raw/rendered . a/A cell/global autorun . r/R run cell/all . V real VisiData .
+q pop/quit
 """
 
 from __future__ import annotations
@@ -333,6 +335,13 @@ class QsqlApp(App):
         elif ch == "N":
             self._repeat_search(reverse=True)
 
+    TAB_ORDER = ["tab_sql", "tab_data", "tab_config", "tab_log"]
+
+    def _cycle_tab(self, delta: int) -> None:
+        tabs = self.query_one(TabbedContent)
+        idx = self.TAB_ORDER.index(tabs.active) if tabs.active in self.TAB_ORDER else 0
+        tabs.active = self.TAB_ORDER[(idx + delta) % len(self.TAB_ORDER)]
+
     def _move(self, d_row: int = 0, d_col: int = 0, top: bool = False, bottom: bool = False) -> None:
         if self.mode == "data":
             if top:
@@ -341,6 +350,9 @@ class QsqlApp(App):
                 self._mutate_sheet(lambda s: s.bottom())
             else:
                 self._mutate_sheet(lambda s: s.move(d_row, d_col))
+            return
+        if d_col:
+            self._cycle_tab(d_col)
             return
         table = self.query_one("#cells", DataTable)
         if top:
@@ -381,18 +393,22 @@ class QsqlApp(App):
             self._refresh_detail()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Clicking straight onto a tab must behave like navigating there."""
+        """Browsing onto a tab (click or h/l) shows content but stays in cells
+        mode, so j/k keep moving the cell selection; Enter is what dives."""
         active = self.query_one(TabbedContent).active
         if active == "tab_data":
-            self.mode = "data"
-            if not self.sheet_stack and self.current_cell:
-                self._push_sheet(
-                    Sheet(self._preview_frame(self.current_cell), title=self.current_cell)
-                )
+            if not self.sheet_stack:
+                self._show_current_data()
         else:
             self.mode = "cells"
             self.sheet_stack = []
             self._refresh_detail()
+
+    def _show_current_data(self) -> None:
+        name = self.current_cell
+        if name:
+            self.sheet_stack = [Sheet(self._preview_frame(name), title=name)]
+            self._refresh_data()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "cells":
@@ -404,8 +420,11 @@ class QsqlApp(App):
         self._push_sheet(Sheet(self._preview_frame(name), title=name))
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id == "cells" and self.mode == "cells":
-            self._refresh_detail()
+        if event.data_table.id != "cells" or self.mode != "cells":
+            return
+        self._refresh_detail()
+        if self.query_one(TabbedContent).active == "tab_data":
+            self._show_current_data()  # the Data sheet follows the selection
 
     # ---------- workers ----------
 

@@ -45,13 +45,35 @@ async def test_activating_data_tab_loads_current_cell_sheet(notebook) -> None:
         tabs = app.query_one(TabbedContent)
         tabs.active = "tab_data"  # click the tab instead of pressing Enter
         await pilot.pause()
-        assert app.mode == "data"
+        assert app.mode == "cells"  # browsing a tab is not a dive
         assert app.sheet_stack and app.sheet_stack[-1].title == "users"
         assert app.query_one("#data", DataTable).row_count > 0
-        tabs.active = "tab_sql"  # leaving Data returns to cells mode
+        tabs.active = "tab_sql"
         await pilot.pause()
         assert app.mode == "cells"
         assert not app.sheet_stack
+
+
+async def test_h_l_cycle_tabs_and_data_follows_selection(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        tabs = app.query_one(TabbedContent)
+        assert tabs.active == "tab_sql"
+        await pilot.press("l")
+        assert tabs.active == "tab_data"
+        assert app.sheet_stack[-1].title == "users"
+        await pilot.press("j")  # j/k still move the cell selection
+        assert app.current_cell == "events"
+        assert app.sheet_stack[-1].title == "events"  # Data pane follows
+        await pilot.press("l", "l")
+        assert tabs.active == "tab_log"
+        await pilot.press("l")  # wraps around
+        assert tabs.active == "tab_sql"
+        await pilot.press("h")
+        assert tabs.active == "tab_log"
 
 
 async def test_detail_pane_fills_remaining_height(notebook) -> None:
