@@ -1,0 +1,64 @@
+# qsql — a notebook for SQL, in one file
+
+A single `.sql` file is the notebook: valid SQL split into named **cells** by comment
+directives. Config is YAML inside `@`-comments; SQL bodies are Jinja-templated. Cells
+form a dependency DAG, run on pluggable **engines** (DuckDB, SQLite, BigQuery), and land
+through pluggable **sinks** (parquet files, DuckDB tables, Postgres tables) that also
+define how downstream cells read them back.
+
+```sql
+-- @engine: duckdb
+-- @output: { type: parquet, dir: data/ }
+
+-- @cell users
+SELECT * FROM {{ source('seeds/users.csv') }};
+
+-- @cell legacy_orders
+/*@ input: { sqlite: legacy.db } */
+SELECT * FROM orders;
+
+-- @cell report
+-- @output: { type: duckdb, path: warehouse.db }
+SELECT u.name, count(*) AS orders
+FROM {{ ref('users') }} u JOIN {{ ref('legacy_orders') }} o USING (user_id)
+GROUP BY 1;
+```
+
+## Quick start
+
+```console
+$ uv sync
+$ uv run qsql            # scaffolds base.sql
+$ uv run qsql run        # runs every cell, lands data/<cell>.parquet
+$ uv run qsql list       # cells, topo order, engine -> sink, autorun
+$ uv run qsql show report        # rendered SQL for one cell
+$ uv run qsql watch      # rerun changed cells + dependents on save
+$ uv run qsql tui        # VisiData-style TUI (j/k, Enter dive, F freq, V real vd)
+$ uv run qsql run --set output.type=duckdb --set vars.active_only=false
+```
+
+## How it works
+
+- **Cells + DAG** — `{{ ref('cell') }}` renders to *how the producer's sink is read
+  back* and records a dependency edge. Topo order runs upstreams first.
+- **DuckDB is the conduit** — cells that `ref()`/`source()` run on DuckDB; other
+  engines extract their result and DuckDB writes it to the chosen sink.
+- **Everything is a plugin** — directives, engines, file readers, and sinks are all
+  registered via decorators. A plugin bundles config fields (with pydantic validation)
+  and can decorate cell execution (retries, caching, SQL emission...). See
+  [docs/plugin-authoring.md](docs/plugin-authoring.md).
+- **Run-time overrides** — `--set key.path=value` and `QSQL_KEY__PATH=value` layer on
+  top of global → cell config.
+
+Optional extras: `uv sync --extra bigquery` (BigQuery engine),
+`--extra visidata` (the TUI's `V` deep-dive). The Postgres sink needs no Python
+driver — DuckDB's `postgres` extension handles it (`output: { type: postgres,
+dsn: "$PG_DSN", table: analytics.report }`).
+
+## Development
+
+Built test-first (red-green-refactor) with pytest; commits follow Conventional Commits.
+
+```console
+$ uv run pytest          # network/bigquery/postgres-gated tests are skipped by default
+```

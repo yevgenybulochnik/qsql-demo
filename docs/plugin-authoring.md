@@ -1,0 +1,75 @@
+# Writing qsql plugins
+
+A plugin bundles up to two capabilities; ship either or both:
+
+1. **Config** — a pydantic model whose fields become directives, validated on the
+   merged config (global → cell → `--set`/env overrides).
+2. **`run`** — a decorator around cell execution.
+
+```python
+from pydantic import BaseModel, field_validator
+
+from qsql_demo.models import Merge, Scope
+from qsql_demo.plugins import Plugin, qfield
+from qsql_demo.registry import plugin
+
+
+@plugin
+class RowLimit(Plugin):
+    scope = Scope.BOTH          # GLOBAL, CELL, or BOTH — where the directives may appear
+    priority = 0                # run-chain order: lower wraps outermore
+
+    class Config(BaseModel):
+        row_limit: int | None = qfield(None)   # `-- @row_limit: 100` now parses + validates
+
+        @field_validator("row_limit")
+        @classmethod
+        def positive(cls, v):
+            if v is not None and v <= 0:
+                raise ValueError("row_limit must be positive")
+            return v
+
+    def run(self, cell, ctx, inner):           # optional behavior hook
+        result = inner(cell, ctx)              # call zero or more times
+        return result
+```
+
+## Config fields
+
+- Field names (or their pydantic alias) become directive keys. Two plugins may not
+  claim the same key — registration fails fast rather than letting pydantic silently
+  shadow one of them.
+- `qfield(default, merge=...)` sets how layers combine: `Merge.OVERRIDE` (default),
+  `Merge.DEEP` (dict merge), `Merge.EXTEND` (list concat).
+- Read your value from `cell.config.<field>` (cell scope) or `ctx.config.<field>`
+  (global scope) — validators have already run.
+
+## The run chain
+
+`runner` wraps the base cell-runner with every plugin that overrides `run`, sorted by
+`(priority, registration order)`; lower priority = outermost. Convention:
+
+- **retries** (outermost, ~-100) — re-invoke `inner` when the result has `ok=False`
+- **caching** (~-50) — skip `inner` entirely and return a synthesized result
+- **timing/logging** (~0) — observe around `inner`
+
+Cell failures arrive as `RunResult(ok=False, error=...)`, so retry-style plugins can
+inspect them; exceptions your plugin raises are caught outside the chain and degrade
+that cell to an error result without killing the run. Builtin `EmitSql`
+(`plugins/emit_sql.py`) is the reference implementation: global `render_dir` config +
+a `run` hook that writes each cell's rendered SQL before delegating —
+`qsql run --set render_dir=build/sql`.
+
+## Other extension points
+
+- `@executor("name")` — run a cell's SQL on a new backend; land the result as a view
+  on the conduit (`executors/base.py`, use `register_frame` for extracted results).
+- `@sink("name")` — a new destination: `prepare` (ATTACH/mkdir), `write`, and
+  `ref_expr` (how downstream DuckDB cells read it back).
+- `@source_reader("name")` — map a file extension to a DuckDB reader expression;
+  declare required extensions via `requires`.
+
+## Loading
+
+- `qsql run --plugins my_plugins` (dotted module) or `--plugins ./my_plugins.py`
+- a `qsqlrc.py` next to the notebook file loads automatically
