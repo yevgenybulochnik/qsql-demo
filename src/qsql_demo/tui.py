@@ -1,6 +1,6 @@
 """The qsql Textual TUI — master-detail, reflect-only, VisiData/vim keys.
 
-Left: a cell list. Right: tabbed SQL / Data / Config / Log for the selected cell.
+Top: a cell list. Bottom: tabbed SQL / Data / Config / Log for the selected cell.
 The Data panel is an in-app VisiData-style Polars sheet (sort/hide/freq/describe);
 ``V`` opens the cell's output in real VisiData. Reflect-only: a background watch
 task recompiles on save and re-runs autorun cells (+ downstream).
@@ -16,7 +16,7 @@ from typing import Any
 import polars as pl
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Vertical
 from textual.widgets import DataTable, Footer, Static, TabbedContent, TabPane
 
 from .compiler import Project
@@ -36,8 +36,8 @@ def _fill(table: DataTable, frame: pl.DataFrame) -> None:
 
 class QsqlApp(App):
     CSS = """
-    #cells { width: 45%; border-right: solid $accent; }
-    #detail { width: 55%; }
+    #cells { height: 40%; border-bottom: solid $accent; }
+    #detail { height: 60%; }
     """
 
     BINDINGS = [
@@ -83,7 +83,7 @@ class QsqlApp(App):
     # -- layout --------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
+        with Vertical():
             yield DataTable(id="cells", cursor_type="row")
             with TabbedContent(id="detail"):
                 with TabPane("SQL", id="tab-sql"):
