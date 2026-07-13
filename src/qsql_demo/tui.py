@@ -85,6 +85,9 @@ class QsqlApp(App):
         self._row_names: list[str] = []
         self._pending_g = False
         self._last_search = ""
+        # what the #data table currently displays; holding the frame reference
+        # keeps identity comparison sound (ids can't be recycled)
+        self._data_shown: tuple[Any, tuple[str, ...], frozenset[int]] | None = None
 
     # ---------- layout ----------
 
@@ -186,21 +189,46 @@ class QsqlApp(App):
         if result and not result.ok and result.error:
             self.log_line(f"{name} failed:\n{result.error}")
 
+    MAX_DATA_ROWS = 200
+    MAX_DATA_COLS = 40  # window rendered around the cursor; re-windows at the edges
+
     def _refresh_data(self) -> None:
         table = self.query_one("#data", DataTable)
-        table.clear(columns=True)
         if not self.sheet_stack:
+            table.clear(columns=True)
+            self._data_shown = None
             return
         sheet = self.sheet_stack[-1]
-        frame = sheet.visible().head(200)
-        table.add_columns(*(str(c) for c in frame.columns))
-        for idx, row in enumerate(frame.rows()):
-            marker = "▸" if idx in sheet.selected else ""
-            table.add_row(*(f"{marker}{v}" if col == 0 else str(v) for col, v in enumerate(row)))
-        if frame.height:
-            table.move_cursor(row=min(sheet.cursor[0], frame.height - 1), column=sheet.cursor[1])
+        cols = sheet.columns
+        cursor_col = min(sheet.cursor[1], max(len(cols) - 1, 0))
+        start = 0
+        if len(cols) > self.MAX_DATA_COLS:
+            start = max(0, min(cursor_col - self.MAX_DATA_COLS // 2, len(cols) - self.MAX_DATA_COLS))
+        window = cols[start : start + self.MAX_DATA_COLS]
+        shown = (sheet.frame, sheet.hidden, sheet.selected, start)
+        if (
+            self._data_shown is None
+            or self._data_shown[0] is not shown[0]
+            or self._data_shown[1:] != shown[1:]
+        ):
+            # rebuild only when content or the column window changed; wide
+            # frames make rebuilds expensive and cursor moves happen per keypress
+            self._data_shown = shown
+            frame = sheet.frame.select(window).head(self.MAX_DATA_ROWS)
+            table.clear(columns=True)
+            table.add_columns(*(str(c) for c in frame.columns))
+            table.add_rows(
+                (("▸" if idx in sheet.selected else "") + str(row[0]), *map(str, row[1:]))
+                for idx, row in enumerate(frame.rows())
+            )
+        height = min(sheet.frame.height, self.MAX_DATA_ROWS)
+        if height:
+            table.move_cursor(row=min(sheet.cursor[0], height - 1), column=cursor_col - start)
         picked = f" · {len(sheet.selected)} selected" if sheet.selected else ""
-        self.sub_title = f"{sheet.title} · {sheet.frame.height}x{len(sheet.columns)}{picked}"
+        span = ""
+        if len(cols) > self.MAX_DATA_COLS:
+            span = f" · cols {start + 1}-{start + len(window)}/{len(cols)}"
+        self.sub_title = f"{sheet.title} · {sheet.frame.height}x{len(cols)}{picked}{span}"
 
     def _mutate_sheet(self, fn) -> None:
         if self.mode != "data" or not self.sheet_stack:
@@ -214,15 +242,18 @@ class QsqlApp(App):
         self.query_one(TabbedContent).active = "tab_data"
         self._refresh_data()
 
+    PREVIEW_ROWS = 100
+
     def _preview_frame(self, name: str) -> pl.DataFrame:
         result = self.results.get(name)
         if result is not None and isinstance(result.preview, pl.DataFrame):
             return result.preview
+        # lazy head, never a full read: landed files can be huge
         if result is not None and result.ok and result.target and result.target.endswith(".parquet"):
-            return pl.read_parquet(result.target)
+            return pl.scan_parquet(result.target).head(self.PREVIEW_ROWS).collect()
         target = self.project.root / "data" / f"{name}.parquet" if self.project else None
         if target and target.exists():
-            return pl.read_parquet(target)
+            return pl.scan_parquet(target).head(self.PREVIEW_ROWS).collect()
         return pl.DataFrame({"info": [f"no output for {name!r} yet — press r to run"]})
 
     # ---------- actions (footer bindings) ----------
@@ -474,11 +505,18 @@ class QsqlApp(App):
             except QsqlError as exc:
                 self.log_line(f"compile error: {exc}")
                 continue
-            to_run = [n for n in plan_rerun(self.hashes, project) if self.cell_autorun(n)]
-            self.project = project
-            self.hashes = hashes_of(project)
-            self._refresh_cells()
-            self._refresh_detail()
-            if to_run:
-                self.log_line(f"changed -> rerunning: {', '.join(to_run)}")
-                self._run_worker(to_run, closure=False)
+            self._on_recompiled(project)
+
+    def _on_recompiled(self, project: Project) -> list[str]:
+        planned = plan_rerun(self.hashes, project)
+        # adopt the new project before consulting autorun overlays: a freshly
+        # added cell only exists in the new one (KeyError otherwise)
+        self.project = project
+        self.hashes = hashes_of(project)
+        self._refresh_cells()
+        self._refresh_detail()
+        to_run = [n for n in planned if self.cell_autorun(n)]
+        if to_run:
+            self.log_line(f"changed -> rerunning: {', '.join(to_run)}")
+            self._run_worker(to_run, closure=False)
+        return to_run

@@ -1,0 +1,29 @@
+-- TUI stress test: 200-column tables at 500 rows and 1M rows.
+-- @engine: duckdb
+-- @output: { type: parquet, dir: data/ }
+
+/*@
+input: { duckdb: stress.db }
+*/
+
+-- @cell full_small
+SELECT * FROM wide_small;
+
+-- @cell agg_big
+SELECT c1, count(*) AS n, avg(c2) AS avg_c2, max(c3) AS max_c3
+FROM wide_big GROUP BY c1 ORDER BY c1;
+
+-- @cell filtered_big
+SELECT * FROM wide_big WHERE c1 < 40;
+
+-- @cell joined
+SELECT b.c1, s.c2 AS small_c2, count(*) AS n
+FROM {{ ref('filtered_big') }} b
+JOIN {{ ref('full_small') }} s USING (id)
+GROUP BY 1, 2;
+
+-- @cell full_big
+SELECT * FROM wide_big;
+
+-- @cell slow_sorted
+SELECT * FROM wide_big ORDER BY c7, c11, c13;

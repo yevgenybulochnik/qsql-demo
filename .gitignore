@@ -12,3 +12,5 @@ wheels/
 # qsql outputs
 data/
 warehouse.db
+stress/stress.db
+stress/data/
