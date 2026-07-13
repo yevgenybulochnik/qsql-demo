@@ -87,3 +87,5 @@ class RunContext:
     root: Path
     overrides: dict[str, Any] = field(default_factory=dict)
     log: list[str] = field(default_factory=list)
+    config: Any = None
+    tmpdir: str | None = None

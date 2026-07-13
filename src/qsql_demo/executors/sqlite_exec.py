@@ -9,7 +9,7 @@ import polars as pl
 from ..errors import ExecutorError
 from ..models import RenderedCell, RunContext
 from ..registry import executor
-from .base import Executor, result_view, strip_trailing_semicolon
+from .base import Executor, register_frame, result_view, strip_trailing_semicolon
 
 
 @executor("sqlite")
@@ -30,6 +30,4 @@ class SQLiteExecutor(Executor):
         finally:
             con.close()
         frame = pl.DataFrame(rows, schema=cols, orient="row")
-        view = result_view(cell.name)
-        ctx.conn.register(view, frame)
-        return view
+        return register_frame(ctx, result_view(cell.name), frame)

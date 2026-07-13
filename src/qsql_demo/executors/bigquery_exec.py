@@ -10,7 +10,7 @@ from typing import Any
 from ..errors import ExecutorError
 from ..models import RenderedCell, RunContext
 from ..registry import executor
-from .base import Executor, result_view, strip_trailing_semicolon
+from .base import Executor, register_frame, result_view, strip_trailing_semicolon
 
 
 @executor("bigquery")
@@ -29,6 +29,4 @@ class BigQueryExecutor(Executor):
         spec = (cell.config.input or {}).get("bigquery") or {}
         client = self.make_client(spec)
         table = client.query(strip_trailing_semicolon(cell.sql)).to_arrow()
-        view = result_view(cell.name)
-        ctx.conn.register(view, table)
-        return view
+        return register_frame(ctx, result_view(cell.name), table)
