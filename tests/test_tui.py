@@ -59,6 +59,23 @@ def test_tui_mounts_and_reacts_to_keys(project_dir: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_tui_survives_removed_current_cell(project_dir: Path) -> None:
+    # regression: deleting the selected cell then recompiling must not crash the UI
+    (project_dir / "base.sql").write_text(PIPELINE)
+    app = QsqlApp(Project.from_file(project_dir / "base.sql"), enable_watch=False)
+
+    async def scenario() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.current = "active_users"
+            reduced = "-- @output: { type: parquet, dir: data/ }\n\n-- @cell users\nSELECT 1 AS id;\n"
+            app.project = Project.from_text(reduced, project_dir=project_dir)
+            app._refresh_detail()  # must not raise KeyError on the removed cell
+            assert app.current == "users"
+
+    asyncio.run(scenario())
+
+
 def test_tui_run_all_populates_results(project_dir: Path) -> None:
     (project_dir / "base.sql").write_text(PIPELINE)
     app = QsqlApp(Project.from_file(project_dir / "base.sql"), enable_watch=False)

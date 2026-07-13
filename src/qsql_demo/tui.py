@@ -98,8 +98,7 @@ class QsqlApp(App):
         cells = self.query_one("#cells", DataTable)
         cells.add_columns("cell", "engine→sink", "auto", "rows")
         self._repopulate_cells()
-        if self.project.order():
-            self.current = self.project.order()[0]
+        self.current = self.project.order()[0] if self.project.order() else None
         self._refresh_detail()
         if self.enable_watch:
             self.run_worker(self._watch_worker(), exclusive=False)
@@ -121,8 +120,19 @@ class QsqlApp(App):
                 key=name,
             )
 
+    def _reconcile_current(self) -> None:
+        """Keep ``current`` valid after a recompile that may add/remove cells."""
+        if self.current not in self.project.cells:
+            order = self.project.order()
+            self.current = order[0] if order else None
+
     def _refresh_detail(self) -> None:
+        self._reconcile_current()
         if self.current is None:
+            for pane in ("#sql", "#config", "#log"):
+                self.query_one(pane, Static).update("")
+            self._sheet = None
+            self._render_sheet()
             return
         cell = self.project.cell(self.current)
         sql = cell.sql if self.sql_mode == "rendered" else cell.sql_raw
@@ -273,5 +283,6 @@ class QsqlApp(App):
                 for result in results:
                     self.results[result.name] = result
             self.project = new
+            self._reconcile_current()
             self._repopulate_cells()
             self._refresh_detail()
