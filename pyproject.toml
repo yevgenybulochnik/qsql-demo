@@ -29,11 +29,13 @@ qsql = "qsql_demo.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-asyncio>=0.24",
     "openpyxl>=3.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 addopts = "-q --strict-markers -m \"not (network or bigquery or postgres)\""
 markers = [
     "network: needs network access (deselected by default)",
