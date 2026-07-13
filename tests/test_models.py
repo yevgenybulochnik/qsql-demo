@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from qsql_demo.models import (
-    Directive,
     Executor,
     Merge,
     RawBlock,
@@ -45,21 +44,6 @@ def test_runresult_ok_and_preview() -> None:
 
     bad = RunResult(name="x", target="", error="boom")
     assert not bad.ok
-
-
-def test_directive_defaults_and_override() -> None:
-    class Bare(Directive):
-        key = "bare"
-
-    class Custom(Directive):
-        key = "custom"
-        scope = Scope.GLOBAL
-        merge = Merge.DEEP
-
-    assert Bare.scope is Scope.CELL
-    assert Bare.merge is Merge.OVERRIDE
-    assert Custom.scope is Scope.GLOBAL
-    assert Custom.merge is Merge.DEEP
 
 
 def test_executor_and_sink_are_abstract() -> None:

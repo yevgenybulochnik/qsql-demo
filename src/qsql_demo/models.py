@@ -106,22 +106,6 @@ class RunResult:
         return self.preview
 
 
-class Directive:
-    """Base for a config directive plugin.
-
-    Subclasses declare the config key via class attributes; the registry reads
-    ``key``/``annotation``/``default`` to assemble the pydantic config models and
-    uses ``scope``/``merge`` during resolution. Behavior hooks (if any) are added
-    by subclasses.
-    """
-
-    key: str
-    scope: Scope = Scope.CELL
-    annotation: Any = str
-    default: Any = None
-    merge: Merge = Merge.OVERRIDE
-
-
 class Executor(ABC):
     """Base for an engine plugin: runs a cell's SQL on a backend.
 

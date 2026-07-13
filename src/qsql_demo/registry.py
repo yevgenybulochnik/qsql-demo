@@ -3,7 +3,6 @@
 Plugin kinds self-register at import time into module-level singletons:
 
 - ``@plugin``         config + run-behavior plugins (Plugin subclasses)
-- ``@directive``      config keys (Directive subclasses)
 - ``@executor``       compute backends (Executor subclasses)
 - ``@sink``           output destinations (Sink subclasses)
 - ``@source_reader``  file readers (functions -> DuckDB reader expression)
@@ -16,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
-from .models import Directive, Executor, Merge, Scope, Sink
+from .models import Executor, Merge, Scope, Sink
 
 if TYPE_CHECKING:  # imported lazily to avoid a cycle through plugins/__init__
     from .plugins.base import Plugin
@@ -82,35 +81,6 @@ class PluginRegistry:
 
     def restore(self, snap: tuple[dict[str, type[Plugin]], dict[str, str]]) -> None:
         self._items, self._fields = dict(snap[0]), dict(snap[1])
-
-
-class DirectiveRegistry:
-    def __init__(self) -> None:
-        self._items: dict[str, type[Directive]] = {}
-
-    def register(self, cls: type[Directive]) -> type[Directive]:
-        if not getattr(cls, "key", None):
-            raise ValueError("a Directive subclass must set `key`")
-        self._items[cls.key] = cls
-        return cls
-
-    def get(self, key: str) -> type[Directive] | None:
-        return self._items.get(key)
-
-    def by_scope(self, *scopes: Scope) -> list[type[Directive]]:
-        return [d for d in self._items.values() if d.scope in scopes]
-
-    def __contains__(self, key: object) -> bool:
-        return key in self._items
-
-    def __iter__(self) -> Iterator[type[Directive]]:
-        return iter(self._items.values())
-
-    def snapshot(self) -> dict[str, type[Directive]]:
-        return dict(self._items)
-
-    def restore(self, snap: dict[str, type[Directive]]) -> None:
-        self._items = dict(snap)
 
 
 class _ClassRegistry:
@@ -197,7 +167,6 @@ class SourceReaderRegistry:
 # --- global singletons + decorator shims -----------------------------------
 
 PLUGINS = PluginRegistry()
-DIRECTIVES = DirectiveRegistry()
 EXECUTORS = ExecutorRegistry()
 SINKS = SinkRegistry()
 SOURCE_READERS = SourceReaderRegistry()
@@ -205,10 +174,6 @@ SOURCE_READERS = SourceReaderRegistry()
 
 def plugin(cls: "type[Plugin]") -> "type[Plugin]":
     return PLUGINS.register(cls)
-
-
-def directive(cls: type[Directive]) -> type[Directive]:
-    return DIRECTIVES.register(cls)
 
 
 def executor(name: str) -> Callable[[type], type]:

@@ -1,92 +1,109 @@
-"""Builtin config directives.
+"""Builtin plugins: each bundles one config directive and its validation.
 
-Each is a ``Directive`` subclass declaring a config key: its pydantic
-``annotation`` + ``default`` feed ``config.build_models``'s ``create_model``, and
-its ``scope`` + ``merge`` drive resolution.
+Each plugin's ``Config`` contributes its field to the ``GlobalConfig``/
+``CellConfig`` models assembled by ``config.build_models``; ``scope`` controls
+where the directive may appear and the ``qfield`` metadata how a cell value
+merges with the inherited global one.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..models import Directive, Merge, Scope
-from ..registry import directive
+from pydantic import BaseModel, field_validator
+
+from ..models import Merge, Scope
+from ..registry import plugin
+from .base import Plugin, qfield
 
 
-@directive
-class Engine(Directive):
-    key = "engine"
+@plugin
+class Engine(Plugin):
+    name = "engine"
     scope = Scope.BOTH
-    annotation = str | None
-    default = None
+
+    class Config(BaseModel):
+        engine: str | None = None
 
 
-@directive
-class Input(Directive):
-    key = "input"
+@plugin
+class Input(Plugin):
+    name = "input"
     scope = Scope.BOTH
-    annotation = dict[str, Any]
-    default: dict[str, Any] = {}
-    merge = Merge.DEEP
+
+    class Config(BaseModel):
+        input: dict[str, Any] = qfield({}, merge=Merge.DEEP)
 
 
-@directive
-class Sources(Directive):
-    key = "sources"
+@plugin
+class Sources(Plugin):
+    name = "sources"
     scope = Scope.BOTH
-    annotation = dict[str, Any]
-    default: dict[str, Any] = {}
-    merge = Merge.DEEP
+
+    class Config(BaseModel):
+        sources: dict[str, Any] = qfield({}, merge=Merge.DEEP)
 
 
-@directive
-class Extensions(Directive):
-    key = "extensions"
+@plugin
+class Extensions(Plugin):
+    name = "extensions"
     scope = Scope.BOTH
-    annotation = list[str]
-    default: list[str] = []
-    merge = Merge.EXTEND
+
+    class Config(BaseModel):
+        extensions: list[str] = qfield([], merge=Merge.EXTEND)
 
 
-@directive
-class Output(Directive):
-    key = "output"
+@plugin
+class Output(Plugin):
+    name = "output"
     scope = Scope.BOTH
-    annotation = dict[str, Any]
-    default: dict[str, Any] = {"type": "parquet", "dir": "data/"}
-    merge = Merge.DEEP
+
+    class Config(BaseModel):
+        output: dict[str, Any] = qfield({"type": "parquet", "dir": "data/"}, merge=Merge.DEEP)
+
+        @field_validator("output")
+        @classmethod
+        def _known_sink_type(cls, value: dict[str, Any]) -> dict[str, Any]:
+            from .. import sinks as _sinks  # noqa: F401  (registers the builtin sinks)
+            from ..registry import SINKS
+
+            sink_type = (value or {}).get("type", "parquet")
+            if sink_type not in SINKS:
+                raise ValueError(f"unknown sink type: {sink_type!r}")
+            return value
 
 
-@directive
-class Autorun(Directive):
-    key = "autorun"
+@plugin
+class Autorun(Plugin):
+    name = "autorun"
     scope = Scope.BOTH
-    annotation = bool
-    default = True
+
+    class Config(BaseModel):
+        autorun: bool = True
 
 
-@directive
-class Vars(Directive):
-    key = "vars"
+@plugin
+class Vars(Plugin):
+    name = "vars"
     scope = Scope.BOTH
-    annotation = dict[str, Any]
-    default: dict[str, Any] = {}
-    merge = Merge.DEEP
+
+    class Config(BaseModel):
+        vars: dict[str, Any] = qfield({}, merge=Merge.DEEP)
 
 
-@directive
-class DependsOn(Directive):
-    key = "depends_on"
+@plugin
+class DependsOn(Plugin):
+    name = "depends_on"
     scope = Scope.CELL
-    annotation = list[str]
-    default: list[str] = []
-    merge = Merge.EXTEND
+
+    class Config(BaseModel):
+        depends_on: list[str] = qfield([], merge=Merge.EXTEND)
 
 
-@directive
-class Tags(Directive):
-    key = "tags"
+@plugin
+class Tags(Plugin):
+    name = "tags"
     scope = Scope.CELL
-    annotation = list[str]
-    default: list[str] = []
-    merge = Merge.EXTEND
+
+    class Config(BaseModel):
+        tags: list[str] = qfield([], merge=Merge.EXTEND)

@@ -22,19 +22,19 @@ def project_dir(tmp_path: Path) -> Path:
 def registries():
     """Snapshot the global plugin registries so a test's registrations don't leak.
 
-    Ensures builtins are loaded, yields the directive registry, and restores all
+    Ensures builtins are loaded, yields the plugin registry, and restores all
     four registries to their pre-test state afterwards.
     """
     import qsql_demo.executors  # noqa: F401  (import triggers executor registration)
-    import qsql_demo.plugins  # noqa: F401  (import triggers directive registration)
+    import qsql_demo.plugins  # noqa: F401  (import triggers plugin registration)
     import qsql_demo.sinks  # noqa: F401  (import triggers sink registration)
     import qsql_demo.sources  # noqa: F401  (import triggers source-reader registration)
-    from qsql_demo.registry import DIRECTIVES, EXECUTORS, PLUGINS, SINKS, SOURCE_READERS
+    from qsql_demo.registry import EXECUTORS, PLUGINS, SINKS, SOURCE_READERS
 
-    registries = (PLUGINS, DIRECTIVES, EXECUTORS, SINKS, SOURCE_READERS)
+    registries = (PLUGINS, EXECUTORS, SINKS, SOURCE_READERS)
     snaps = [(r, r.snapshot()) for r in registries]
     try:
-        yield DIRECTIVES
+        yield PLUGINS
     finally:
         for reg, snap in snaps:
             reg.restore(snap)

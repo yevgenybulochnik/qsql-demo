@@ -1,40 +1,33 @@
 """Build the dynamic pydantic config models and resolve per-cell config.
 
-``build_models`` assembles ``GlobalConfig``/``CellConfig`` from the registered
-directives via ``pydantic.create_model`` (the plugin centerpiece). Resolution
-merges global -> cell -> run-overrides using each directive's merge strategy,
-validates against the model, and derives the resolved engine + sink.
+``build_models`` composes ``GlobalConfig``/``CellConfig`` from the registered
+plugins' ``Config`` models by multiple inheritance (fields and validators both
+carry over). Resolution merges global -> cell -> run-overrides using each
+field's merge strategy, validates against the model, and derives the resolved
+engine + sink.
 """
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
-from pydantic import ConfigDict, Field, ValidationError, create_model
+from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 
 from .errors import ConfigError
 from .models import Merge, Scope
 from .plugins import builtin as _builtin  # noqa: F401  (ensures builtins registered)
-from .registry import DIRECTIVES, DirectiveRegistry
+from .registry import PLUGINS, PluginRegistry
 from .util import deep_merge
 
 _MODEL_CONFIG = ConfigDict(extra="forbid")
 
 
-def _field_spec(directive: type) -> tuple[Any, Any]:
-    default = directive.default
-    if isinstance(default, (dict, list)):
-        return (directive.annotation, Field(default_factory=lambda d=default: copy.deepcopy(d)))
-    return (directive.annotation, default)
-
-
-def build_models(registry: DirectiveRegistry = DIRECTIVES):
-    """Return ``(GlobalConfig, CellConfig)`` built from the registered directives."""
-    global_fields = {d.key: _field_spec(d) for d in registry.by_scope(Scope.GLOBAL, Scope.BOTH)}
-    cell_fields = {d.key: _field_spec(d) for d in registry.by_scope(Scope.CELL, Scope.BOTH)}
-    GlobalConfig = create_model("GlobalConfig", __config__=_MODEL_CONFIG, **global_fields)
-    CellConfig = create_model("CellConfig", __config__=_MODEL_CONFIG, **cell_fields)
+def build_models(registry: PluginRegistry = PLUGINS):
+    """Return ``(GlobalConfig, CellConfig)`` composed from the registered plugins."""
+    global_bases = tuple(p.Config for p in registry.by_scope(Scope.GLOBAL, Scope.BOTH)) or (BaseModel,)
+    cell_bases = tuple(p.Config for p in registry.by_scope(Scope.CELL, Scope.BOTH)) or (BaseModel,)
+    GlobalConfig = create_model("GlobalConfig", __base__=global_bases, __config__=_MODEL_CONFIG)
+    CellConfig = create_model("CellConfig", __base__=cell_bases, __config__=_MODEL_CONFIG)
     return GlobalConfig, CellConfig
 
 
@@ -46,29 +39,28 @@ def _merge_value(existing: Any, value: Any, strategy: Merge) -> Any:
     return value
 
 
-def _combine(sources: list[dict[str, Any]], registry: DirectiveRegistry) -> dict[str, Any]:
+def _combine(sources: list[dict[str, Any]], registry: PluginRegistry) -> dict[str, Any]:
     acc: dict[str, Any] = {}
     for src in sources:
         for key, value in src.items():
-            directive = registry.get(key)
-            strategy = directive.merge if directive else Merge.OVERRIDE
+            strategy = registry.field_merge(key)
             acc[key] = _merge_value(acc[key], value, strategy) if key in acc else value
     return acc
 
 
-def _check_scope(directives: dict[str, Any], allowed: tuple[Scope, ...], where: str, registry: DirectiveRegistry) -> None:
+def _check_scope(directives: dict[str, Any], allowed: tuple[Scope, ...], where: str, registry: PluginRegistry) -> None:
     for key in directives:
-        d = registry.get(key)
-        if d is None:
+        owner = registry.field_owner(key)
+        if owner is None:
             raise ConfigError(f"unknown directive: @{key}")
-        if d.scope not in allowed:
+        if owner.scope not in allowed:
             raise ConfigError(f"@{key} is not allowed {where}")
 
 
 def resolve_global(
     header: dict[str, Any],
     overrides: dict[str, Any] | None = None,
-    registry: DirectiveRegistry = DIRECTIVES,
+    registry: PluginRegistry = PLUGINS,
     model: Any = None,
 ):
     """Resolve the global (header) config."""
@@ -76,7 +68,7 @@ def resolve_global(
     model = model or build_models(registry)[0]
     scopes = (Scope.GLOBAL, Scope.BOTH)
     _check_scope(header, scopes, "in the global header", registry)
-    ov = {k: v for k, v in overrides.items() if (d := registry.get(k)) and d.scope in scopes}
+    ov = {k: v for k, v in overrides.items() if (p := registry.field_owner(k)) and p.scope in scopes}
     merged = _combine([header, ov], registry)
     try:
         return model(**merged)
@@ -88,7 +80,7 @@ def resolve_cell(
     header: dict[str, Any],
     cell: dict[str, Any],
     overrides: dict[str, Any] | None = None,
-    registry: DirectiveRegistry = DIRECTIVES,
+    registry: PluginRegistry = PLUGINS,
     model: Any = None,
 ):
     """Resolve one cell's config: inherit BOTH-scoped header keys, then cell, then overrides."""
@@ -99,8 +91,8 @@ def resolve_cell(
     _check_scope(header, (Scope.GLOBAL, Scope.BOTH), "in the global header", registry)
     _check_scope(cell, cell_scopes, "on a cell", registry)
 
-    inherited = {k: v for k, v in header.items() if registry.get(k).scope is Scope.BOTH}
-    ov = {k: v for k, v in overrides.items() if (d := registry.get(k)) and d.scope in cell_scopes}
+    inherited = {k: v for k, v in header.items() if registry.field_owner(k).scope is Scope.BOTH}
+    ov = {k: v for k, v in overrides.items() if (p := registry.field_owner(k)) and p.scope in cell_scopes}
     merged = _combine([inherited, cell, ov], registry)
     try:
         return model(**merged)

@@ -19,7 +19,7 @@ from .plugins import builtin as _builtin  # noqa: F401  (ensure directives regis
 from . import executors as _executors  # noqa: F401  (ensure executors registered)
 from . import sinks as _sinks  # noqa: F401  (ensure sinks registered)
 from . import sources as _sources  # noqa: F401  (ensure source readers registered)
-from .registry import DIRECTIVES, EXECUTORS, SINKS, DirectiveRegistry
+from .registry import EXECUTORS, PLUGINS, SINKS, PluginRegistry
 from .render import render_cell
 
 
@@ -78,7 +78,7 @@ class Project:
         text: str,
         *,
         overrides: dict[str, Any] | None = None,
-        registry: DirectiveRegistry = DIRECTIVES,
+        registry: PluginRegistry = PLUGINS,
         project_dir: str | Path | None = None,
     ) -> "Project":
         overrides = overrides or {}
@@ -135,7 +135,7 @@ class Project:
         path: str | Path,
         *,
         overrides: dict[str, Any] | None = None,
-        registry: DirectiveRegistry = DIRECTIVES,
+        registry: PluginRegistry = PLUGINS,
     ) -> "Project":
         path = Path(path)
         text = path.read_text(encoding="utf-8")
