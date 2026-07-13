@@ -1,0 +1,42 @@
+-- A BigQuery pipeline: extract remotely, blend locally on DuckDB.
+--
+-- Setup (extractions run real BigQuery jobs; compiling/listing needs nothing):
+--     uv sync --extra bigquery
+--     gcloud auth application-default login
+-- Then, from this directory:
+--     qsql run bigquery.qsql --set input.bigquery.project=my-billing-project
+--
+-- How it works: a BigQuery cell runs remotely, is pulled back as a Polars
+-- frame, and lands through its sink (parquet here) like any other cell — so
+-- downstream DuckDB cells can {{ ref(...) }} it. The reverse is not allowed:
+-- cells on a non-DuckDB engine cannot use ref()/source() (compile guardrail).
+
+-- @output: { type: parquet, dir: data/ }
+
+-- Every cell inherits this input (deep-merged); with `bigquery` as the sole
+-- input key, the engine is inferred — no `@engine` line needed on the
+-- extraction cells. Set the project literally here or via --set at run time.
+/*@ input: { bigquery: { project: my-gcp-project } } */
+
+-- @cell names_1910s
+SELECT name, sum(number) AS total
+FROM `bigquery-public-data.usa_names.usa_1910_2013`
+WHERE year BETWEEN 1910 AND 1919
+GROUP BY name;
+
+-- @cell names_2000s
+-- @engine: bigquery       # or say it explicitly
+SELECT name, sum(number) AS total
+FROM `bigquery-public-data.usa_names.usa_1910_2013`
+WHERE year BETWEEN 2000 AND 2009
+GROUP BY name;
+
+-- @cell comeback_names
+-- @engine: duckdb         # opt back out of the inherited input's inference
+SELECT a.name, a.total AS in_1910s, b.total AS in_2000s,
+       round(b.total / a.total, 1) AS ratio
+FROM {{ ref('names_1910s') }} a
+JOIN {{ ref('names_2000s') }} b USING (name)
+WHERE b.total > a.total * 2
+ORDER BY ratio DESC
+LIMIT 25;

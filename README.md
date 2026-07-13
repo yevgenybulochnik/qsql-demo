@@ -19,6 +19,10 @@ uv run qsql watch      # re-run changed cells (and downstream) on save
 uv run qsql tui        # interactive master-detail explorer
 ```
 
+Worked examples live in `examples/`: `pipeline.qsql` (a small end-to-end DAG),
+`kitchen-sink.qsql` (every feature, runs offline), and `bigquery.qsql` (remote
+extraction blended locally; compiles without credentials).
+
 ## The file format
 
 ```sql

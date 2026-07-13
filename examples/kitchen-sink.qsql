@@ -1,0 +1,103 @@
+-- The kitchen sink: every qsql feature in one runnable file.
+-- From this directory:  qsql run kitchen-sink.qsql       (offline, no extras)
+--                       qsql watch kitchen-sink.qsql     (re-run on save)
+--                       qsql tui kitchen-sink.qsql
+--
+-- Layout rules: everything before the first @cell is the global header, which
+-- every cell inherits and may override. Directives are @-comments parsed as
+-- YAML — line form `-- @key: value`, block form `/*@ ... */`. Directive values
+-- are literal (never templated); Jinja applies to SQL bodies only.
+
+-- ── global header ────────────────────────────────────────────────────────────
+-- @engine: duckdb                            # default engine (also the conduit)
+-- @output: { type: parquet, dir: data/ }     # default sink: data/<cell>.parquet
+-- @autorun: true                             # watch/tui re-run cells by default
+-- @render_dir: build/sql                     # emit each cell's compiled SQL
+--                                            # (the EmitSql plugin; try
+--                                            #  --set render_dir=elsewhere)
+
+/*@
+vars:                          # var('k') / {{ vars.k }} in SQL bodies
+  min_amount: 60
+sources:                       # named inputs for source(); type inferred
+  regions: { path: ./seeds/regions.csv }      # from the extension, or explicit:
+                                              # { type: csv, path: ..., header: true }
+*/
+
+-- ── plain cells (VALUES seeds; plain -- comments pass through into the SQL) ──
+
+-- @cell products
+-- @tags: [seed]
+SELECT * FROM (VALUES
+    (1, 'anvil'),
+    (2, 'rocket skates'),
+    (3, 'tornado seeds')
+) AS t(product_id, product);
+
+-- @cell orders
+-- @tags: [seed]
+-- SQL bodies are Jinja templates: loops, conditionals, filters all work.
+SELECT * FROM (VALUES
+{%- for i in range(1, 10) %}
+    ({{ i }}, {{ (i % 3) + 1 }}, {{ (i % 4) + 1 }}, {{ i * 25 }}.0){{ "," if not loop.last else "" }}
+{%- endfor %}
+) AS t(order_id, product_id, region_id, amount);
+
+-- ── refs, sources, vars, env ─────────────────────────────────────────────────
+
+-- @cell enriched
+-- ref('x') reads cell x back through its sink and adds a DAG edge implicitly,
+-- no @depends_on needed. source() reads a file input. var() reads the @vars
+-- config (cell overrides global); env() reads the environment. (Note: plain
+-- comments are part of the Jinja-templated body too — this text is rendered.)
+/*@ vars: { min_amount: 50 } */
+SELECT o.order_id, p.product, r.region, o.amount,
+       '{{ env('QSQL_LABEL', 'dev') }}' AS label
+FROM {{ ref('orders') }} o
+JOIN {{ ref('products') }} p USING (product_id)
+JOIN {{ source('regions') }} r USING (region_id)
+WHERE o.amount >= {{ var('min_amount') }};
+
+-- ── per-cell sink override (+ explicit @depends_on) ──────────────────────────
+
+-- @cell summary
+-- @depends_on: [enriched]                    # explicit edge (refs already imply one)
+-- @output: { type: duckdb, path: kitchen.db }
+-- Lands as a table in kitchen.db instead of parquet; downstream ref() would
+-- read it back through an ATTACH. A postgres sink works the same way:
+--   @output: { type: postgres, dsn: 'postgresql://...', table: summary }
+SELECT region, count(*) AS orders, sum(amount) AS revenue
+FROM {{ ref('enriched') }}
+GROUP BY region
+ORDER BY revenue DESC;
+
+-- ── DuckDB extensions ────────────────────────────────────────────────────────
+
+-- @cell events
+-- @extensions: [json]                        # LOADed before the cell runs
+SELECT payload ->> '$.event' AS event, count(*) AS n
+FROM (VALUES
+    ('{"event": "view", "user": 1}'),
+    ('{"event": "click", "user": 1}'),
+    ('{"event": "view", "user": 2}')
+) AS t(payload)
+GROUP BY event;
+
+-- ── autorun opt-out ──────────────────────────────────────────────────────────
+
+-- @cell expensive_audit
+-- @autorun: false                            # watch/tui skip it; `qsql run` and
+-- @tags: [audit]                             # --select still execute it
+SELECT count(*) AS total_rows FROM {{ ref('enriched') }};
+
+-- ── other engines (need their inputs; see bigquery.qsql for a full pipeline) ─
+--
+-- A sqlite cell (engine inferred from the sole @input key):
+--     -- @cell app_users
+--     /*@ input: { sqlite: seeds/app.sqlite } */
+--     SELECT * FROM users;
+--
+-- Non-DuckDB cells run remotely/locally and land through their sink, but they
+-- cannot use ref()/source()/@depends_on themselves (compile-time guardrail).
+--
+-- Per-run overrides beat everything:  --set output.dir=out  or  QSQL_output__dir=out
