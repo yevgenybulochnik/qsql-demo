@@ -50,6 +50,53 @@ def test_sqlite_executor_bad_sql_raises(ctx) -> None:
         EXECUTORS.get("sqlite").execute(cell, ctx)
 
 
+def test_bigquery_same_context_cells_share_a_session(tmp_path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from qsql_demo.compiler import compile_text
+
+    calls: list[tuple[str, object]] = []
+
+    class FakeJob:
+        def __init__(self, sql: str, first: bool) -> None:
+            self._sql = sql
+            self.session_info = SimpleNamespace(session_id="sess-1") if first else None
+
+        def to_arrow(self):
+            return pl.DataFrame({"n": [1, 2, 3]})
+
+    class FakeClient:
+        def query(self, sql, job_config=None):
+            calls.append((sql, job_config))
+            return FakeJob(sql, first=len(calls) == 1)
+
+    monkeypatch.setattr(BigQueryExecutor, "make_client", lambda self, spec: FakeClient())
+    monkeypatch.setattr(
+        BigQueryExecutor, "_job_config", lambda self, state: {"session": state["session_id"]}
+    )
+    project = compile_text(
+        "/*@ input: { bigquery: { project: p } } */\n"
+        "-- @cell parent\nSELECT * FROM src;\n"
+        "-- @cell child\nSELECT count(*) AS c FROM {{ ref('parent') }};",
+        root=tmp_path,
+    )
+    assert project.cells["child"].engine == "bigquery"  # legal: same context
+    results = {r.cell: r for r in project.run()}
+    assert all(r.ok for r in results.values()), [r.error for r in results.values()]
+
+    sqls = [sql for sql, _ in calls]
+    assert any(s.startswith("CREATE OR REPLACE TEMP TABLE parent AS") for s in sqls)
+    assert "SELECT * FROM parent" in sqls          # extraction reads the temp once
+    assert sum("FROM src" in s for s in sqls) == 1  # the parent query ran exactly once
+    assert any("count(*)" in s and "FROM parent" in s for s in sqls)  # child in-engine
+    # every job after the first rides the captured session id
+    assert calls[0][1] == {"session": None}
+    assert all(cfg == {"session": "sess-1"} for _, cfg in calls[1:])
+    # landing-by-default: the parent stays inspectable as parquet
+    assert (tmp_path / "data" / "parent.parquet").exists()
+    assert (tmp_path / "data" / "child.parquet").exists()
+
+
 def test_bigquery_executor_with_fake_client(ctx, monkeypatch) -> None:
     frame = pl.DataFrame({"user_id": [1, 2], "event": ["click", "view"]})
 
