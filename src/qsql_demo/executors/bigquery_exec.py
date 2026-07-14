@@ -58,6 +58,9 @@ class BigQueryExecutor(Executor):
 
     def _query(self, state: dict, sql: str) -> Any:
         job = state["client"].query(sql, job_config=self._job_config(state))
+        # query() only *submits*; sessions allow one active job at a time, so
+        # wait for completion before the next statement goes in
+        job.result()
         if state["session_id"] is None:
             info = getattr(job, "session_info", None)
             session_id = getattr(info, "session_id", None)

@@ -56,17 +56,23 @@ def test_bigquery_same_context_cells_share_a_session(tmp_path, monkeypatch) -> N
     from qsql_demo.compiler import compile_text
 
     calls: list[tuple[str, object]] = []
+    events: list[str] = []  # submit/wait interleaving: sessions forbid concurrency
 
     class FakeJob:
         def __init__(self, sql: str, first: bool) -> None:
             self._sql = sql
             self.session_info = SimpleNamespace(session_id="sess-1") if first else None
 
+        def result(self):
+            events.append("wait")
+            return self
+
         def to_arrow(self):
             return pl.DataFrame({"n": [1, 2, 3]})
 
     class FakeClient:
         def query(self, sql, job_config=None):
+            events.append("submit")
             calls.append((sql, job_config))
             return FakeJob(sql, first=len(calls) == 1)
 
@@ -92,6 +98,9 @@ def test_bigquery_same_context_cells_share_a_session(tmp_path, monkeypatch) -> N
     # every job after the first rides the captured session id
     assert calls[0][1] == {"session": None}
     assert all(cfg == {"session": "sess-1"} for _, cfg in calls[1:])
+    # regression: real sessions reject concurrent jobs — every submit must be
+    # waited on before the next one goes in
+    assert events == ["submit", "wait"] * len(calls)
     # landing-by-default: the parent stays inspectable as parquet
     assert (tmp_path / "data" / "parent.parquet").exists()
     assert (tmp_path / "data" / "child.parquet").exists()
