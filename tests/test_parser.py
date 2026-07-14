@@ -60,6 +60,25 @@ def test_block_line_numbers() -> None:
     assert [b.line for b in blocks[1:]] == [11, 14]
 
 
+def test_block_spans_and_source_slices() -> None:
+    lines = SAMPLE.splitlines()
+    header, users, events = parse_text(SAMPLE)
+    assert (header.line, header.line_end) == (1, 10)
+    assert header.source == "\n".join(lines[0:10])
+    assert (users.line, users.line_end) == (11, 13)
+    assert users.source == "\n".join(lines[10:13])
+    assert users.source.startswith("-- @cell users")  # directives stay in source
+    assert (events.line, events.line_end) == (14, len(lines))
+    assert "-- @depends_on: [users]" in events.source
+
+
+def test_header_only_before_first_cell_on_line_one() -> None:
+    blocks = parse_text("-- @cell a\nSELECT 1;")
+    assert (blocks[0].line, blocks[0].line_end) == (1, 0)
+    assert blocks[0].source == ""
+    assert blocks[1].source == "-- @cell a\nSELECT 1;"
+
+
 def test_body_hash_stable_under_surrounding_whitespace() -> None:
     assert body_hash("SELECT 1") == body_hash("\n  SELECT 1  \n\n".strip())
     assert body_hash("SELECT 1") != body_hash("SELECT 2")
