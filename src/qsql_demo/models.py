@@ -68,6 +68,10 @@ class RenderedCell:
     line: int = 0
     line_end: int = 0
     source: str = ""
+    context: str = ""
+    context_refs: list[str] = field(default_factory=list)
+    external_refs: list[str] = field(default_factory=list)
+    reffed_in_context: bool = False
 
 
 @dataclass
@@ -98,3 +102,4 @@ class RunContext:
     config: Any = None
     tmpdir: str | None = None
     ext_cache: set[str] = field(default_factory=set)
+    session: Any = None

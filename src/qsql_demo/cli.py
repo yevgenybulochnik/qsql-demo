@@ -191,7 +191,9 @@ def explain(
     for name in project.order:
         cell = project.cells[name]
         deps = ", ".join(cell.depends_on) or "-"
-        typer.echo(f"  {name:<24} {cell.engine} → {cell.sink_type}  deps: {deps}")
+        typer.echo(
+            f"  {name:<24} {cell.engine} → {cell.sink_type}  ctx: {cell.context}  deps: {deps}"
+        )
 
 
 @app.command()

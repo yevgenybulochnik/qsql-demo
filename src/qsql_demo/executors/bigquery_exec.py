@@ -15,6 +15,10 @@ from .base import Executor, register_frame, result_view, strip_trailing_semicolo
 
 @executor("bigquery")
 class BigQueryExecutor(Executor):
+    def context_key(self, config: Any) -> str:
+        spec = (config.input or {}).get("bigquery") or {}
+        return f"bigquery:{spec.get('project')}"
+
     def make_client(self, spec: dict[str, Any]) -> Any:
         """Split out so tests can substitute a fake client."""
         try:

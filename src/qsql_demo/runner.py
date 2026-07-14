@@ -61,6 +61,8 @@ class RunSession:
         self.conn: Any = None
         self.tmpdir: str | None = None
         self.loaded_extensions: set[str] = set()
+        self.engine_sessions: dict[str, Any] = {}  # context key -> engine session
+        self.materialized: set[str] = set()  # cells with a live temp table
         self._target: str | None = None
 
     def conduit(self, project: Project) -> Any:
@@ -73,6 +75,7 @@ class RunSession:
             self.conn = duckdb.connect(target)
             self._target = target
             self.loaded_extensions = set()
+            self.materialized = set()  # conduit temps died with the connection
         return self.conn
 
     def close(self) -> None:
@@ -80,6 +83,12 @@ class RunSession:
             self.conn.close()
             self.conn = None
             self._target = None
+        for session in self.engine_sessions.values():
+            close = getattr(session, "close", None)
+            if callable(close):
+                close()
+        self.engine_sessions = {}
+        self.materialized = set()
         if self.tmpdir:
             shutil.rmtree(self.tmpdir, ignore_errors=True)
             self.tmpdir = None
@@ -104,6 +113,20 @@ def _selection(project: Project, select: list[str] | None, closure: bool) -> lis
     return [n for n in project.order if n in wanted]
 
 
+def _expand_missing_temps(project: Project, names: list[str], session: RunSession) -> list[str]:
+    """Exact-set runs (watch) still need same-context upstreams whose temp
+    tables aren't live in this session — landed artifacts can't stand in for
+    an in-engine temp reference."""
+    wanted = set(names)
+    stack = list(names)
+    while stack:
+        for upstream in project.cells[stack.pop()].context_refs:
+            if upstream not in wanted and upstream not in session.materialized:
+                wanted.add(upstream)
+                stack.append(upstream)
+    return [n for n in project.order if n in wanted]
+
+
 def base_runner(project: Project) -> Inner:
     """The innermost cell-runner; `project` rides in via closure so the chain
     signature stays (cell, ctx)."""
@@ -123,6 +146,8 @@ def base_runner(project: Project) -> Inner:
                 up_sink.prepare(ctx.conn)
             sink.prepare(ctx.conn)
             view = EXECUTORS.get(cell.engine).execute(cell, ctx)
+            if cell.reffed_in_context and ctx.session is not None:
+                ctx.session.materialized.add(cell.name)
             rows, target = sink.write(cell, view, ctx.conn)
             preview = _preview(ctx.conn, sink.ref_expr(cell.name))
             return RunResult(
@@ -173,12 +198,16 @@ def run_project(
         config=project.config,
         tmpdir=session.tmpdir,
         ext_cache=session.loaded_extensions,
+        session=session,
     )
     chain = build_chain(project)
+    names = _selection(project, select, closure)
+    if select is not None and not closure:
+        names = _expand_missing_temps(project, names, session)
     results: list[RunResult] = []
     try:
         _notify(ctx, "before_run", lambda p: p.before_run(project, ctx))
-        for name in _selection(project, select, closure):
+        for name in names:
             cell = project.cells[name]
             try:
                 result = chain(cell, ctx)

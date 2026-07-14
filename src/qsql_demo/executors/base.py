@@ -67,6 +67,13 @@ def _normalize_arrow(ctx: RunContext, frame: Any) -> Any:
 
 class Executor(ABC):
     name: ClassVar[str] = ""
+    # engines that keep a per-context session where same-context cells can
+    # reference each other as temp tables (in the engine's own dialect)
+    supports_context_refs: ClassVar[bool] = False
+
+    def context_key(self, config: Any) -> str:
+        """Cells with equal keys share an execution context (engine + target)."""
+        return f"{self.name}:"
 
     @abstractmethod
     def execute(self, cell: RenderedCell, ctx: RunContext) -> str:

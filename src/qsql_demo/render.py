@@ -23,6 +23,15 @@ from .sinks.base import Sink
 
 
 @dataclass
+class Producer:
+    """What a downstream cell needs to know about an upstream: how its output
+    is read back (sink) and which execution context it runs in."""
+
+    sink: Sink
+    context: str = ""
+
+
+@dataclass
 class RenderContext:
     """Per-cell render capabilities handed to render hooks.
 
@@ -33,10 +42,14 @@ class RenderContext:
     name: str
     config: Any
     root: Path
-    producers: Mapping[str, Sink]
+    producers: Mapping[str, Producer]
+    context: str = ""
+    supports_context_refs: bool = False
     edges: list[str] = field(default_factory=list)
     extensions: list[str] = field(default_factory=list)
     used_source: bool = False
+    context_refs: list[str] = field(default_factory=list)
+    external_refs: list[str] = field(default_factory=list)
 
     def add_edge(self, cell_name: str) -> None:
         """Record that this cell depends on another cell's landed output."""
@@ -46,10 +59,23 @@ class RenderContext:
             self.edges.append(cell_name)
 
     def producer_expr(self, cell_name: str) -> str:
-        """How DuckDB reads the named cell's output back (its sink's ref_expr)."""
+        """How this cell reads the named upstream: a bare temp-table name when
+        both share an execution context (in-engine, dialect-neutral), else the
+        producer sink's read-back expression on the DuckDB conduit."""
         if cell_name not in self.producers:
             raise ConfigError(f"cell {self.name!r}: unknown cell {cell_name!r} in ref()")
-        return self.producers[cell_name].ref_expr(cell_name)
+        producer = self.producers[cell_name]
+        if (
+            self.supports_context_refs
+            and producer.context
+            and producer.context == self.context
+        ):
+            if cell_name not in self.context_refs:
+                self.context_refs.append(cell_name)
+            return cell_name
+        if cell_name not in self.external_refs:
+            self.external_refs.append(cell_name)
+        return producer.sink.ref_expr(cell_name)
 
     def require_extensions(self, extensions: list[str]) -> None:
         for ext in extensions:
@@ -83,10 +109,19 @@ def render_sql(
     name: str,
     sql_raw: str,
     config: Any,
-    producers: Mapping[str, Sink],
+    producers: Mapping[str, Producer],
     root: Path,
+    context: str = "",
+    supports_context_refs: bool = False,
 ) -> tuple[str, RenderContext]:
-    rctx = RenderContext(name=name, config=config, root=root, producers=producers)
+    rctx = RenderContext(
+        name=name,
+        config=config,
+        root=root,
+        producers=producers,
+        context=context,
+        supports_context_refs=supports_context_refs,
+    )
     context = build_context(rctx)
 
     jinja = Environment(undefined=StrictUndefined, keep_trailing_newline=True)

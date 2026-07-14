@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 import polars as pl
 
@@ -14,6 +15,11 @@ from .base import Executor, register_frame, result_view, strip_trailing_semicolo
 
 @executor("sqlite")
 class SQLiteExecutor(Executor):
+    def context_key(self, config: Any) -> str:
+        spec = (config.input or {}).get("sqlite")
+        path = spec.get("path") if isinstance(spec, dict) else spec
+        return f"sqlite:{path or ':memory:'}"
+
     def execute(self, cell: RenderedCell, ctx: RunContext) -> str:
         spec = (cell.config.input or {}).get("sqlite")
         path = spec.get("path") if isinstance(spec, dict) else spec

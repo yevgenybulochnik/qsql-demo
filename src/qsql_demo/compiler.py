@@ -12,8 +12,8 @@ from .errors import CellError, ConfigError, ConfigErrorGroup
 from .graph import topo_sort
 from .models import RawBlock, RenderedCell, RunResult
 from .parser import body_hash, parse_text
-from .registry import PLUGINS
-from .render import render_sql
+from .registry import EXECUTORS, PLUGINS
+from .render import Producer, render_sql
 from .sinks import make_sink
 
 
@@ -74,14 +74,30 @@ def compile_text(
             errors.append(_cell_error(blk, exc))
     if errors:
         raise ConfigErrorGroup(where, errors)
-    sinks = {name: make_sink(cfg, root) for name, cfg in configs.items()}
+    engines = {name: resolve_engine(cfg) for name, cfg in configs.items()}
+    contexts = {
+        name: EXECUTORS.get(engines[name]).context_key(cfg) for name, cfg in configs.items()
+    }
+    producers = {
+        name: Producer(sink=make_sink(cfg, root), context=contexts[name])
+        for name, cfg in configs.items()
+    }
 
     # stage 2: render + wire every cell, again reporting all failures together
     cells: dict[str, RenderedCell] = {}
     for blk in cell_blocks:
         cfg = configs[blk.name]
+        engine = engines[blk.name]
         try:
-            sql, rec = render_sql(blk.name, blk.sql, cfg, sinks, root)
+            sql, rec = render_sql(
+                blk.name,
+                blk.sql,
+                cfg,
+                producers,
+                root,
+                context=contexts[blk.name],
+                supports_context_refs=EXECUTORS.get(engine).supports_context_refs,
+            )
             deps: list[str] = []
             for plug in PLUGINS.overriding("collect_edges"):
                 for dep in plug.collect_edges(blk.name, cfg) or []:
@@ -94,11 +110,12 @@ def compile_text(
                 if edge not in deps:
                     deps.append(edge)
             extensions = list(dict.fromkeys([*cfg.extensions, *rec.extensions]))
-            engine = resolve_engine(cfg)
-            if engine != "duckdb" and (deps or rec.used_source or extensions):
+            # cross-context refs and file sources read through the duckdb
+            # conduit; same-context refs stay in-engine and are exempt
+            if engine != "duckdb" and (rec.external_refs or rec.used_source or extensions):
                 raise ConfigError(
-                    f"uses ref()/source()/@extensions and must run on duckdb, "
-                    f"not {engine!r} (duckdb is the cross-cell conduit)"
+                    f"uses cross-context ref()/source()/@extensions and must run on "
+                    f"duckdb, not {engine!r} (duckdb is the cross-cell conduit)"
                 )
         except ConfigError as exc:
             errors.append(_cell_error(blk, exc))
@@ -117,9 +134,15 @@ def compile_text(
             line=blk.line,
             line_end=blk.line_end,
             source=blk.source,
+            context=contexts[blk.name],
+            context_refs=list(rec.context_refs),
+            external_refs=list(rec.external_refs),
         )
     if errors:
         raise ConfigErrorGroup(where, errors)
+    referenced_in_context = {name for c in cells.values() for name in c.context_refs}
+    for cell in cells.values():
+        cell.reffed_in_context = cell.name in referenced_in_context
 
     order = topo_sort(list(cells), {n: c.depends_on for n, c in cells.items()})
     project = Project(
