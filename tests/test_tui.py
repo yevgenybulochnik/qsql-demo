@@ -93,12 +93,54 @@ async def test_watch_recompile_with_new_cell_runs_it(notebook) -> None:
     # KeyError for a freshly added cell and crashed the watch worker
     app = QsqlApp(path=notebook, watch=False, auto_run=False)
     async with app.run_test() as pilot:
+        await pilot.press("R")  # arm autorun
+        await app.workers.wait_for_complete()
+        await pilot.pause()
         notebook.write_text(notebook.read_text() + "\n-- @cell fresh\nSELECT 1 AS z;\n")
         to_run = app._on_recompiled(compile_file(notebook))
         assert "fresh" in to_run
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert app.results["fresh"].ok
+
+
+async def test_no_initial_run_until_run_all(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False)  # defaults: nothing runs on start
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.results == {}
+        assert app.armed is False
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.armed is True
+        assert app.results["users"].ok
+
+
+async def test_watch_reruns_gated_until_armed(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False)
+    async with app.run_test() as pilot:
+        notebook.write_text(notebook.read_text().replace("range(10)", "range(5)"))
+        assert app._on_recompiled(compile_file(notebook)) == []  # adopt, don't run
+        assert app.results == {}
+        assert app.project.cells["events"].sql_raw.count("range(5)")  # view refreshed
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        notebook.write_text(notebook.read_text().replace("range(5)", "range(7)"))
+        to_run = app._on_recompiled(compile_file(notebook))
+        assert "events" in to_run  # armed: changes rerun again
+        await app.workers.wait_for_complete()
+
+
+async def test_single_cell_run_does_not_arm_autorun(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False)
+    async with app.run_test() as pilot:
+        await pilot.press("r")  # run just the selected cell
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.results["users"].ok
+        assert app.armed is False  # run-all is the explicit gate
 
 
 def test_preview_frame_survives_interval_parquet(tmp_path) -> None:

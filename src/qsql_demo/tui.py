@@ -2,8 +2,9 @@
 
 Top: the cell list (engine -> sink, autorun, status, rows). Below: tabs for
 SQL (t toggles raw/rendered), Data (a stack of Polars Sheets with vim keys),
-Config, and Log. The file is edited in your own editor; a background watcher
-recompiles on save and reruns autorun cells. The TUI never writes the file.
+Config, and Log. Nothing runs on startup: the first R (run all) arms autorun,
+after which a background watcher recompiles on save and reruns autorun cells.
+The file is edited in your own editor; the TUI never writes it.
 
 Keys: j/k cell rows . h/l cycle detail tabs . gg/G top/bottom . Enter dive into
 the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
@@ -66,13 +67,14 @@ class QsqlApp(App):
         path: Path | str,
         overrides: dict[str, Any] | None = None,
         watch: bool = True,
-        auto_run: bool = True,
+        auto_run: bool = False,
     ) -> None:
         super().__init__()
         self.path = Path(path)
         self.overrides = overrides or {}
         self.watch = watch
         self.auto_run = auto_run
+        self.armed = False  # watch reruns stay dormant until the first run-all
         self.project: Project | None = None
         self.session = RunSession()  # reused across reruns; run worker is exclusive
         self.results: dict[str, RunResult] = {}
@@ -123,6 +125,8 @@ class QsqlApp(App):
         self._refresh_detail()
         if self.auto_run:
             self.action_run_all()
+        else:
+            self.log_line("autorun paused — press R to run all cells and arm watch reruns")
         if self.watch:
             self._watch_worker()
 
@@ -308,6 +312,7 @@ class QsqlApp(App):
             self._run_worker([self.current_cell], closure=True)
 
     def action_run_all(self) -> None:
+        self.armed = True
         self._run_worker(None, closure=True)
 
     def action_frequency(self) -> None:
@@ -534,6 +539,12 @@ class QsqlApp(App):
         self.hashes = hashes_of(project)
         self._refresh_cells()
         self._refresh_detail()
+        if not self.armed:
+            if planned:
+                self.log_line(
+                    f"changed: {', '.join(planned)} (autorun paused — press R to run all)"
+                )
+            return []
         to_run = [n for n in planned if self.cell_autorun(n)]
         if to_run:
             self.log_line(f"changed -> rerunning: {', '.join(to_run)}")
