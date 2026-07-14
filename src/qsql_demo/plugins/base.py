@@ -56,12 +56,14 @@ class Plugin:
         return None
 
     # -- render seams (compile time) ------------------------------------------
-    def render_context(self, name: str, config: Any, context: dict[str, Any]) -> dict[str, Any]:
-        """Add Jinja globals for a cell's SQL body. Core globals (ref/source/
-        var/env) are applied after all plugins and always win on collision."""
-        return context
+    def render_context(self, rctx: Any) -> dict[str, Any] | None:
+        """Contribute Jinja globals for a cell's SQL body: return a dict of
+        name -> value. rctx is the RenderContext capability object (name,
+        config, root, add_edge, producer_expr, require_extensions, ...).
+        Two providers for one key is a compile error."""
+        return None
 
-    def after_render(self, name: str, config: Any, sql: str) -> str | None:
+    def after_render(self, rctx: Any, sql: str) -> str | None:
         """Transform a cell's rendered SQL; return the new SQL, or None to
         keep it. Transformers compose in (priority, registration) order."""
         return None

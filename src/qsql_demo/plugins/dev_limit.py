@@ -26,8 +26,8 @@ class DevLimit(Plugin):
                 raise ValueError("dev_limit must be positive")
             return v
 
-    def after_render(self, name: str, config: Any, sql: str) -> str | None:
-        limit = getattr(config, "dev_limit", None)
+    def after_render(self, rctx: Any, sql: str) -> str | None:
+        limit = getattr(rctx.config, "dev_limit", None)
         if not limit:
             return None
         body = sql.strip().rstrip(";")
