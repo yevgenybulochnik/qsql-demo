@@ -30,6 +30,38 @@ def test_parquet_sink_lands_file_named_after_cell(conn, tmp_path) -> None:
     assert sink.ref_expr("users") == f"read_parquet('{tmp_path}/data/users.parquet')"
 
 
+def test_parquet_sink_lands_hugeint_as_decimal_not_double(conn, tmp_path) -> None:
+    # duckdb's parquet writer stores HUGEINT as DOUBLE — silent precision loss;
+    # the sink casts to DECIMAL(38,0) so values land exactly
+    conn.execute(
+        "CREATE TEMP VIEW hv AS SELECT 123456789012345678901234567890::HUGEINT AS h, 1 AS i"
+    )
+    sink = SINKS.get("parquet")({}, tmp_path)
+    rows, target = sink.write(_cell("sums"), "hv", conn)
+    assert rows == 1
+    kind, value = conn.sql(f"SELECT typeof(h), h FROM read_parquet('{target}')").fetchone()
+    assert kind == "DECIMAL(38,0)"
+    assert int(value) == 123456789012345678901234567890
+
+    import polars as pl
+
+    frame = pl.read_parquet(target)
+    assert str(frame["h"][0]) == "123456789012345678901234567890"
+    assert frame["i"].dtype == pl.Int32  # untouched columns stay as they were
+
+
+def test_parquet_sink_hugeint_overflow_fails_loudly(tmp_path) -> None:
+    from qsql_demo.compiler import compile_text
+
+    project = compile_text(
+        "-- @cell too_big\nSELECT 170141183460469231731687303715884105727::HUGEINT AS h;",
+        root=tmp_path,
+    )
+    result = project.run()[0]
+    assert result.ok is False  # a conversion error beats silent corruption
+    assert "conversion" in result.error.lower() or "range" in result.error.lower()
+
+
 def test_parquet_sink_honors_dir(conn, tmp_path) -> None:
     sink = SINKS.get("parquet")({"dir": "out/"}, tmp_path)
     _, target = sink.write(_cell("u"), "v", conn)

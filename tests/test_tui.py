@@ -101,6 +101,25 @@ async def test_watch_recompile_with_new_cell_runs_it(notebook) -> None:
         assert app.results["fresh"].ok
 
 
+def test_preview_frame_survives_interval_parquet(tmp_path) -> None:
+    # duckdb round-trips INTERVAL parquet, but polars' reader panics on it;
+    # the cold-start preview must go through duckdb instead
+    import duckdb
+
+    f = write_scaffold(tmp_path / "base.sql")
+    app = QsqlApp(path=f, watch=False, auto_run=False)
+    app.project = compile_file(f)
+    (tmp_path / "data").mkdir()
+    con = duckdb.connect()
+    con.execute(
+        f"COPY (SELECT INTERVAL 3 DAY AS iv, 1 AS n) TO '{tmp_path}/data/users.parquet' (FORMAT PARQUET)"
+    )
+    con.close()
+    frame = app._preview_frame("users")
+    assert frame.height == 1
+    assert frame["iv"].dtype == pl.Duration("us")
+
+
 def test_preview_frame_reads_head_only(tmp_path) -> None:
     # landed files can be huge; the fallback must never load them fully
     f = write_scaffold(tmp_path / "base.sql")
