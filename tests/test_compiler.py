@@ -75,6 +75,43 @@ def test_extensions_union_config_and_render_collected(tmp_path) -> None:
     assert set(project.cells["a"].extensions) == {"spatial", "excel"}
 
 
+def test_all_config_errors_reported_together_with_lines(tmp_path) -> None:
+    from qsql_demo.errors import ConfigErrorGroup
+
+    text = (
+        "-- @cell good\nSELECT 1;\n"
+        "-- @cell bad_directive\n-- @bogus: 1\nSELECT 2;\n"
+        "-- @cell bad_sink\n-- @output: { type: carrier_pigeon }\nSELECT 3;\n"
+    )
+    with pytest.raises(ConfigErrorGroup) as exc:
+        compile_text(text, root=tmp_path)
+    msg = str(exc.value)
+    assert "cell 'bad_directive' (line 3)" in msg
+    assert "@bogus" in msg
+    assert "cell 'bad_sink' (line 6)" in msg
+    assert "carrier_pigeon" in msg
+    assert [e.cell for e in exc.value.errors] == ["bad_directive", "bad_sink"]
+
+
+def test_all_render_errors_reported_together(tmp_path) -> None:
+    from qsql_demo.errors import ConfigErrorGroup
+
+    text = (
+        "-- @cell a\nSELECT * FROM {{ ref('ghost') }};\n"
+        "-- @cell b\nSELECT {{ var('nope') }};\n"
+    )
+    with pytest.raises(ConfigErrorGroup) as exc:
+        compile_text(text, root=tmp_path)
+    msg = str(exc.value)
+    assert "cell 'a' (line 1)" in msg and "ghost" in msg
+    assert "cell 'b' (line 3)" in msg and "undefined var" in msg
+
+
+def test_single_error_still_matches_substring(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="unknown directive: @bogus"):
+        compile_text("-- @cell a\n-- @bogus: 1\nSELECT 1;", root=tmp_path)
+
+
 def test_cycle_reported(tmp_path) -> None:
     from qsql_demo.errors import CycleError
 
