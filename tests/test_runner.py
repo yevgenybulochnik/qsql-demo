@@ -195,6 +195,41 @@ def test_exact_selection_expands_through_missing_temps(tmp_path) -> None:
         fresh.close()
 
 
+def test_sqlite_cells_ref_each_other_in_context(tmp_path) -> None:
+    con = sqlite3.connect(tmp_path / "legacy.sqlite")
+    con.execute("CREATE TABLE nums (n INTEGER)")
+    con.executemany("INSERT INTO nums VALUES (?)", [(1,), (2,), (3,)])
+    con.commit()
+    con.close()
+
+    project = compile_text(
+        "/*@ input: { sqlite: legacy.sqlite } */\n"
+        "-- @cell parent\nSELECT n FROM nums WHERE n > 1;\n"
+        "-- @cell child\nSELECT count(*) AS c FROM {{ ref('parent') }};",
+        root=tmp_path,
+    )
+    assert project.cells["child"].engine == "sqlite"  # legal now: same context
+    assert "FROM parent" in project.cells["child"].sql
+    results = {r.cell: r for r in project.run()}
+    assert all(r.ok for r in results.values()), [r.error for r in results.values()]
+    assert pl.read_parquet(tmp_path / "data" / "parent.parquet").height == 2
+    assert pl.read_parquet(tmp_path / "data" / "child.parquet")["c"][0] == 2
+
+
+def test_sqlite_memory_context_shares_one_connection(tmp_path) -> None:
+    # separate connections would each get their own :memory: db — the child
+    # seeing the parent's temp table proves the context session is shared
+    project = compile_text(
+        "/*@ input: { sqlite: ':memory:' } */\n"
+        "-- @cell seed\nSELECT 41 + 1 AS answer;\n"
+        "-- @cell reader\nSELECT answer FROM {{ ref('seed') }};",
+        root=tmp_path,
+    )
+    results = {r.cell: r for r in project.run()}
+    assert all(r.ok for r in results.values()), [r.error for r in results.values()]
+    assert pl.read_parquet(tmp_path / "data" / "reader.parquet")["answer"][0] == 42
+
+
 def test_chain_wraps_outermost_first(tmp_path) -> None:
     calls: list[str] = []
 
