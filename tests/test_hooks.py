@@ -2,7 +2,10 @@
 
 from dataclasses import replace
 
+import pytest
+
 from qsql_demo.compiler import compile_text
+from qsql_demo.errors import ConfigError
 from qsql_demo.plugins.base import Plugin
 from qsql_demo.registry import PLUGINS, plugin
 
@@ -126,12 +129,67 @@ def test_dev_limit_cell_null_disables_it(tmp_path) -> None:
 
 
 def test_dev_limit_rejects_nonpositive(tmp_path) -> None:
-    import pytest
-
-    from qsql_demo.errors import ConfigError
-
     with pytest.raises(ConfigError, match="dev_limit"):
         compile_text("-- @dev_limit: 0\n-- @cell a\nSELECT 1;", root=tmp_path)
+
+
+# ---------- lifecycle notifications ----------
+
+
+def test_after_compile_sees_the_project(tmp_path) -> None:
+    seen: list[list[str]] = []
+
+    @plugin
+    class Lint(Plugin):
+        def after_compile(self, project):
+            seen.append(list(project.cells))
+
+    compile_text("-- @cell a\nSELECT 1;\n-- @cell b\nSELECT 2;", root=tmp_path)
+    assert seen == [["a", "b"]]
+
+
+def test_after_compile_can_reject_the_project(tmp_path) -> None:
+    @plugin
+    class TagsRequired(Plugin):
+        def after_compile(self, project):
+            untagged = [n for n, c in project.cells.items() if not c.config.tags]
+            if untagged:
+                raise ConfigError(f"cells missing @tags: {', '.join(untagged)}")
+
+    with pytest.raises(ConfigError, match="missing @tags: a"):
+        compile_text("-- @cell a\nSELECT 1;", root=tmp_path)
+    project = compile_text("-- @tags: [ok]\n-- @cell a\nSELECT 1;", root=tmp_path)
+    assert project.cells["a"].config.tags == ["ok"]
+
+
+def test_before_and_after_run_notifications(tmp_path) -> None:
+    events: list[str] = []
+
+    @plugin
+    class Notify(Plugin):
+        def before_run(self, project, ctx):
+            events.append("start")
+
+        def after_run(self, project, results):
+            events.append(f"end:{len(results)}:{all(r.ok for r in results)}")
+
+    project = compile_text("-- @cell a\nSELECT 1;\n-- @cell b\nSELECT 2;", root=tmp_path)
+    project.run()
+    assert events == ["start", "end:2:True"]
+
+
+def test_failing_lifecycle_notification_is_contained(tmp_path) -> None:
+    @plugin
+    class Boom(Plugin):
+        def before_run(self, project, ctx):
+            raise RuntimeError("boom before")
+
+        def after_run(self, project, results):
+            raise RuntimeError("boom after")
+
+    project = compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+    results = project.run()
+    assert results[0].ok  # the run itself is unaffected
 
 
 def test_sugar_respects_chain_priority(tmp_path) -> None:
