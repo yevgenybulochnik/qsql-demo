@@ -45,8 +45,43 @@ JOIN {{ ref('events') }} e USING (user_id)
 """
 
 
-# starting templates offered by init and the TUI's notebook picker
+# builtin starting templates offered by init and the TUI's notebook picker
 TEMPLATES: dict[str, str] = {"base": BASE_SQL}
+
+
+def user_templates_dir() -> Path:
+    return Path.home() / ".qsql" / "templates"
+
+
+def user_templates() -> dict[str, Path]:
+    """User-defined starting templates: ~/.qsql/templates/*.qsql[.sql],
+    named by file stem. Missing directory just means none."""
+    directory = user_templates_dir()
+    if not directory.is_dir():
+        return {}
+    out: dict[str, Path] = {}
+    for f in sorted(directory.glob("*.qsql")) + sorted(directory.glob("*.qsql.sql")):
+        name = f.name
+        for suffix in (".qsql.sql", ".qsql"):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        out.setdefault(name, f)
+    return out
+
+
+def template_names() -> list[str]:
+    """Builtins first, then user templates alphabetically."""
+    return [*TEMPLATES, *sorted(user_templates())]
+
+
+def template_content(name: str) -> str:
+    if name in TEMPLATES:
+        return TEMPLATES[name]
+    paths = user_templates()
+    if name in paths:
+        return paths[name].read_text()
+    raise KeyError(f"unknown template: {name!r}")
 
 
 def write_scaffold(path: Path | str, template: str = "base") -> Path:
@@ -55,5 +90,5 @@ def write_scaffold(path: Path | str, template: str = "base") -> Path:
     if path.exists():
         raise FileExistsError(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(TEMPLATES[template])
+    path.write_text(template_content(template))
     return path

@@ -47,8 +47,9 @@ first `@cell`) inherited by every cell.
 - `uv run pytest` — markers `network` / `bigquery` / `postgres` are deselected by default.
 - `uv run qsql` (bare = init) | `init` | `run` | `watch` | `tui` | `list` | `show <cell>` |
   `compile` — default file `base.qsql`; `--set key.path=value` repeatable. `qsql tui`
-  with a missing file opens a notebook picker (existing .qsql/.sql files + starter
-  templates); `o` in the TUI switches notebooks.
+  with a missing file opens a notebook picker: existing .qsql/.qsql.sql files plus
+  starter templates (builtin `base` + user templates from `~/.qsql/templates/*.qsql`);
+  `o` in the TUI switches notebooks.
 
 ## Architecture map (`src/qsql_demo/`)
 

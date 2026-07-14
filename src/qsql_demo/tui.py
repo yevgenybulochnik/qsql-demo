@@ -41,7 +41,8 @@ from .watcher import hashes_of, plan_rerun
 
 
 class NotebookPicker(ModalScreen):
-    """Choose a notebook in the directory, or create one from a starting template."""
+    """Choose a notebook in the directory, or create one from a starting
+    template (builtin, plus any under ~/.qsql/templates)."""
 
     BINDINGS = [Binding("escape", "cancel", "cancel")]
 
@@ -50,10 +51,10 @@ class NotebookPicker(ModalScreen):
     #picker { width: 64; max-height: 20; border: solid $primary; padding: 1; }
     """
 
-    def __init__(self, directory: Path, create_name: str | None) -> None:
+    def __init__(self, directory: Path, creates: list[tuple[str, str]]) -> None:
         super().__init__()
         self.directory = directory
-        self.create_name = create_name
+        self.creates = creates  # (target filename, template name) pairs
 
     def compose(self) -> ComposeResult:
         # notebooks only: .qsql, or .qsql.sql for editors that want SQL
@@ -62,10 +63,10 @@ class NotebookPicker(ModalScreen):
             self.directory.glob("*.qsql.sql")
         )
         options = [Option(f"open    {f.name}", id=f"open:{f}") for f in notebooks]
-        if self.create_name:
-            options.append(
-                Option(f"create  {self.create_name} — starter template", id=f"template:{self.create_name}")
-            )
+        options += [
+            Option(f"create  {target} — template {name!r}", id=f"template:{i}")
+            for i, (target, name) in enumerate(self.creates)
+        ]
         with Vertical(id="picker"):
             yield Static("select a notebook — Enter opens, Esc cancels")
             yield OptionList(*options)
@@ -81,7 +82,10 @@ class NotebookPicker(ModalScreen):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         kind, _, value = (event.option.id or "").partition(":")
-        self.dismiss((kind, value))
+        if kind == "template":
+            self.dismiss(("template", self.creates[int(value)]))
+        else:
+            self.dismiss(("open", value))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -198,15 +202,20 @@ class QsqlApp(App):
             self._watch_worker()  # exclusive group: replaces any previous watcher
 
     def _show_picker(self, startup: bool) -> None:
-        directory = self.path.parent if str(self.path.parent) else Path(".")
-        if not self.path.exists():
-            create_name = self.path.name
-        elif not (directory / "base.qsql").exists():
-            create_name = "base.qsql"
-        else:
-            create_name = None
+        from .scaffold import template_names
 
-        def chosen(result: tuple[str, str] | None) -> None:
+        directory = self.path.parent if str(self.path.parent) else Path(".")
+        creates: list[tuple[str, str]] = []
+        if not self.path.exists():
+            # the requested file is missing: any template may seed it
+            creates = [(self.path.name, name) for name in template_names()]
+        else:  # switching: offer each template under its own filename
+            for name in template_names():
+                target = "base.qsql" if name == "base" else f"{name}.qsql"
+                if not (directory / target).exists():
+                    creates.append((target, name))
+
+        def chosen(result: tuple[str, Any] | None) -> None:
             if result is None:
                 if startup:
                     self.exit()
@@ -215,11 +224,12 @@ class QsqlApp(App):
             if kind == "template":
                 from .scaffold import write_scaffold
 
-                self._load_notebook(write_scaffold(directory / value))
+                target, name = value
+                self._load_notebook(write_scaffold(directory / target, template=name))
             else:
                 self._load_notebook(Path(value))
 
-        self.push_screen(NotebookPicker(directory, create_name), chosen)
+        self.push_screen(NotebookPicker(directory, creates), chosen)
 
     def action_open_notebook(self) -> None:
         self._show_picker(startup=False)

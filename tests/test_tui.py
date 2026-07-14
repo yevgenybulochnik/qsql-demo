@@ -61,6 +61,31 @@ async def test_picker_lists_qsql_and_qsql_sql_but_ignores_plain_sql(tmp_path) ->
         assert not any("schema_dump.sql" in p for p in prompts)
 
 
+async def test_user_templates_offered_and_seed_the_requested_file(tmp_path, monkeypatch) -> None:
+    from textual.widgets import OptionList
+
+    home = tmp_path / "home"
+    (home / ".qsql" / "templates").mkdir(parents=True)
+    (home / ".qsql" / "templates" / "metrics.qsql").write_text(
+        "-- @cell tpl\nSELECT 7 AS seven;\n"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    workdir = tmp_path / "proj"
+    workdir.mkdir()
+    app = QsqlApp(path=workdir / "base.qsql", watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        ol = app.screen.query_one(OptionList)
+        prompts = [str(ol.get_option_at_index(i).prompt) for i in range(ol.option_count)]
+        assert any("template 'base'" in p for p in prompts)
+        assert any("template 'metrics'" in p for p in prompts)
+        await pilot.press("down", "enter")  # base first, metrics second
+        await pilot.pause()
+        # the user template seeded the *requested* filename
+        assert (workdir / "base.qsql").read_text().startswith("-- @cell tpl")
+        assert list(app.project.cells) == ["tpl"]
+
+
 async def test_o_switches_between_notebooks_and_resets_state(tmp_path) -> None:
     from qsql_demo.tui import NotebookPicker
 
