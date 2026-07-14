@@ -30,5 +30,10 @@ class DevLimit(Plugin):
         limit = getattr(rctx.config, "dev_limit", None)
         if not limit:
             return None
-        body = sql.strip().rstrip(";")
+        # drop trailing comment lines so the statement's ';' can be stripped —
+        # an interior ';' inside the wrapping parentheses is a syntax error
+        lines = sql.strip().splitlines()
+        while lines and (not lines[-1].strip() or lines[-1].lstrip().startswith("--")):
+            lines.pop()
+        body = "\n".join(lines).rstrip().rstrip(";")
         return f"SELECT * FROM (\n{body}\n) AS __qsql_dev_limit LIMIT {limit};"

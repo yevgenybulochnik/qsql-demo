@@ -154,6 +154,17 @@ def test_dev_limit_cell_null_disables_it(tmp_path) -> None:
     assert "LIMIT" not in project.cells["full"].sql
 
 
+def test_dev_limit_handles_trailing_comments_after_semicolon(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell tail\nSELECT * FROM range(10);\n\n-- trailing note\n-- another\n",
+        root=tmp_path,
+        overrides={"dev_limit": 3},
+    )
+    result = project.run()[0]
+    assert result.ok, result.error
+    assert result.rows == 3
+
+
 def test_dev_limit_rejects_nonpositive(tmp_path) -> None:
     with pytest.raises(ConfigError, match="dev_limit"):
         compile_text("-- @dev_limit: 0\n-- @cell a\nSELECT 1;", root=tmp_path)

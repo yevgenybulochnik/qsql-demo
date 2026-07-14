@@ -69,12 +69,16 @@ a `run` hook that writes each cell's rendered SQL before delegating —
 
 ## Render seams (compile time)
 
-- `render_context(name, config, context) -> context` — add Jinja globals/filters for
-  SQL bodies (macro libraries, helpers). Core globals (`ref`/`source`/`var`/`env`)
-  apply after all plugins and always win on collision — they record side-channel
-  state (edges, extensions) a replacement couldn't.
-- `after_render(name, config, sql) -> sql | None` — transform rendered SQL; return
-  None to keep it. Transformers compose in `(priority, registration)` order. Builtin
+- `render_context(rctx) -> dict | None` — **contribute** Jinja globals for SQL bodies:
+  return `{"name": value}`. Two providers for one key is a compile error (mirroring
+  the config-field collision guard), so contributions can't silently shadow each
+  other. `rctx` is the `RenderContext` capability object: `name`, `config`, `root`,
+  plus verbs `add_edge(cell)`, `producer_expr(cell)`, `require_extensions(exts)`,
+  `mark_source_used()`, `resolve_path(path)`. The builtin globals are themselves
+  plugin contributions — `Refs` (`ref`), `Sources` (`source`), `Vars` (`var`/`vars`),
+  `Env` (`env`) — each bundled with the directive it consumes.
+- `after_render(rctx, sql) -> sql | None` — transform rendered SQL; return None to
+  keep it. Transformers compose in `(priority, registration)` order. Builtin
   `DevLimit` (`plugins/dev_limit.py`) is the reference: `--set dev_limit=100` wraps
   every cell in a LIMIT; a cell opts out with `-- @dev_limit: null`.
 
