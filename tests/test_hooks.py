@@ -58,32 +58,58 @@ def test_sugar_only_plugin_joins_the_run_chain() -> None:
     assert "only_before" in [p.name for p in PLUGINS.chain()]
 
 
-def test_render_context_plugin_adds_jinja_globals(tmp_path) -> None:
+def test_render_context_plugin_contributes_jinja_globals(tmp_path) -> None:
     @plugin
     class Macros(Plugin):
-        def render_context(self, name, config, context):
-            context["greeting"] = "hello"
-            return context
+        def render_context(self, rctx):
+            return {"greeting": "hello"}
 
     project = compile_text("-- @cell a\nSELECT '{{ greeting }}' AS g;", root=tmp_path)
     assert "'hello' AS g" in project.cells["a"].sql
 
 
-def test_render_context_cannot_shadow_core_globals(tmp_path) -> None:
+def test_render_context_receives_capabilities(tmp_path) -> None:
+    @plugin
+    class UsesCtx(Plugin):
+        def render_context(self, rctx):
+            return {"whoami": f"{rctx.name}@{rctx.config.autorun}"}
+
+    project = compile_text("-- @cell a\nSELECT '{{ whoami }}' AS w;", root=tmp_path)
+    assert "'a@True'" in project.cells["a"].sql
+
+
+def test_contributing_a_taken_key_is_a_compile_error(tmp_path) -> None:
     @plugin
     class Hijack(Plugin):
-        def render_context(self, name, config, context):
-            context["ref"] = lambda n: "HACKED"
-            return context
+        def render_context(self, rctx):
+            return {"ref": lambda n: "HACKED"}
 
-    project = compile_text(
-        "-- @cell a\nSELECT 1 AS x;\n-- @cell b\nSELECT * FROM {{ ref('a') }};",
-        root=tmp_path,
-    )
-    sql = project.cells["b"].sql
-    assert "HACKED" not in sql
-    assert "read_parquet" in sql
-    assert project.cells["b"].depends_on == ["a"]  # edge recording survived
+    with pytest.raises(ConfigError, match="ref.*hijack|hijack.*ref"):
+        compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+
+
+def test_two_plugins_colliding_on_a_key_names_both(tmp_path) -> None:
+    @plugin
+    class One(Plugin):
+        def render_context(self, rctx):
+            return {"shared": 1}
+
+    @plugin
+    class Two(Plugin):
+        def render_context(self, rctx):
+            return {"shared": 2}
+
+    with pytest.raises(ConfigError, match="one") as excinfo:
+        compile_text("-- @cell a\nSELECT 1;", root=tmp_path)
+    assert "two" in str(excinfo.value)
+
+
+def test_deleting_the_vars_plugin_removes_the_var_global(tmp_path) -> None:
+    # behavior truly lives in the plugin: without it, var() is undefined
+    snap = PLUGINS.snapshot()
+    PLUGINS.restore({k: v for k, v in snap.items() if k != "vars"})
+    with pytest.raises(ConfigError, match="template error"):
+        compile_text("-- @cell a\nSELECT {{ var('x', 1) }};", root=tmp_path)
 
 
 def test_after_render_transformers_compose_in_priority_order(tmp_path) -> None:
@@ -91,14 +117,14 @@ def test_after_render_transformers_compose_in_priority_order(tmp_path) -> None:
     class Footer(Plugin):
         priority = 10
 
-        def after_render(self, name, config, sql):
+        def after_render(self, rctx, sql):
             return sql + "\n-- footer"
 
     @plugin
     class Header(Plugin):
         priority = -10
 
-        def after_render(self, name, config, sql):
+        def after_render(self, rctx, sql):
             return "-- header\n" + sql
 
     sql = compile_text("-- @cell a\nSELECT 1;", root=tmp_path).cells["a"].sql

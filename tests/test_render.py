@@ -2,6 +2,26 @@ import pytest
 
 from qsql_demo.compiler import compile_text
 from qsql_demo.errors import ConfigError
+from qsql_demo.render import RenderContext
+
+
+def test_render_context_capability_verbs(tmp_path) -> None:
+    project = compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+    rctx = RenderContext(
+        name="probe", config=project.cells["a"].config, root=tmp_path,
+        producers={},
+    )
+    with pytest.raises(ConfigError, match="unknown cell"):
+        rctx.add_edge("ghost")
+    with pytest.raises(ConfigError, match="unknown cell"):
+        rctx.producer_expr("ghost")
+    rctx.require_extensions(["excel", "excel", "spatial"])
+    assert rctx.extensions == ["excel", "spatial"]
+    assert not rctx.used_source
+    rctx.mark_source_used()
+    assert rctx.used_source
+    assert rctx.resolve_path("seeds/x.csv") == str(tmp_path / "seeds" / "x.csv")
+    assert rctx.resolve_path("/abs/x.csv") == "/abs/x.csv"
 
 
 def test_ref_emits_producer_parquet_ref_expr_and_edge(tmp_path) -> None:
