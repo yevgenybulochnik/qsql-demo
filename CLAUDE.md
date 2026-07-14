@@ -12,9 +12,14 @@ first `@cell`) inherited by every cell.
 - **Sinks are the cross-cell interchange.** Each cell lands via its sink (default
   `data/<cell>.parquet`); `Sink.ref_expr()` tells downstream cells how to read it back
   (read_parquet, ATTACHed duckdb/postgres table, ...).
-- **DuckDB is the universal conduit.** Cells that use `ref()`/`source()`/`@extensions`
-  must run on duckdb (compile-time guardrail); other engines (sqlite, bigquery) extract
-  to Polars/Arrow and DuckDB lands it in any sink.
+- **Engine contexts.** Cells partition by (engine, connection target) via
+  `Executor.context_key`. Same-context `ref()` resolves to a bare temp-table name in
+  the engine's own dialect (session-scoped: duckdb conduit / shared sqlite connection /
+  BigQuery session), executing the dependency next to the data; the cell still lands
+  via its sink from that temp — one execution, two consumers.
+- **DuckDB is the cross-context conduit.** Cells using *cross-context*
+  `ref()`/`source()`/`@extensions` must run on duckdb (compile-time guardrail); other
+  engines extract to Polars/Arrow and DuckDB lands it in any sink.
 - **Everything is a plugin.** `@plugin` / `@executor` / `@source_reader` / `@sink`
   decorators register into registries (`registry.py`). A `Plugin` bundles a pydantic
   `Config` (its fields become directives; validators run on merged config; merge

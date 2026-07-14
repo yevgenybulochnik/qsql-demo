@@ -114,6 +114,10 @@ the runtime order is registry state, and this makes it readable.
 
 - `@executor("name")` — run a cell's SQL on a new backend; land the result as a view
   on the conduit (`executors/base.py`, use `register_frame` for extracted results).
+  Override `context_key(config)` (engine + connection target) and set
+  `supports_context_refs = True` to let same-context cells reference each other as
+  session-scoped temp tables in your engine's dialect (see the sqlite/bigquery
+  executors); reffed cells arrive with `reffed_in_context`/`context_refs` set.
 - `@sink("name")` — a new destination: `prepare` (ATTACH/mkdir), `write`, and
   `ref_expr` (how downstream DuckDB cells read it back).
 - `@source_reader("name")` — map a file extension to a DuckDB reader expression;
