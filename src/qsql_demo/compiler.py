@@ -8,12 +8,23 @@ from typing import Any
 
 from .bootstrap import load_builtins
 from .config import resolve_cell, resolve_engine, resolve_global, resolve_sink_type
-from .errors import ConfigError
+from .errors import CellError, ConfigError, ConfigErrorGroup
 from .graph import topo_sort
-from .models import RenderedCell, RunResult
+from .models import RawBlock, RenderedCell, RunResult
 from .parser import body_hash, parse_text
 from .render import render_sql
 from .sinks import make_sink
+
+
+def _cell_error(blk: RawBlock, exc: ConfigError) -> CellError:
+    """Strip the cell-name prefix/suffix our own messages carry — the group
+    line already names the cell and its line."""
+    msg = str(exc)
+    for prefix in (f"invalid config for cell {blk.name!r}: ", f"cell {blk.name!r}: "):
+        if msg.startswith(prefix):
+            msg = msg[len(prefix) :]
+            break
+    return CellError(cell=blk.name or "<header>", line=blk.line, message=msg.replace(f" (cell {blk.name!r})", ""))
 
 
 @dataclass
@@ -45,34 +56,55 @@ def compile_text(
     load_builtins()
     root = Path(root)
     overrides = overrides or {}
+    where = str(path) if path else "<text>"
     blocks = parse_text(text)
     header, cell_blocks = blocks[0], blocks[1:]
     global_cfg = resolve_global(header.directives, overrides)
-    configs = {
-        blk.name: resolve_cell(header.directives, blk.directives, overrides, name=blk.name)
-        for blk in cell_blocks
-    }
+
+    # stage 1: resolve every cell's config, reporting all failures together
+    configs: dict[str, Any] = {}
+    errors: list[CellError] = []
+    for blk in cell_blocks:
+        try:
+            configs[blk.name] = resolve_cell(
+                header.directives, blk.directives, overrides, name=blk.name
+            )
+        except ConfigError as exc:
+            errors.append(_cell_error(blk, exc))
+    if errors:
+        raise ConfigErrorGroup(where, errors)
     sinks = {name: make_sink(cfg, root) for name, cfg in configs.items()}
 
+    # stage 2: render + wire every cell, again reporting all failures together
     cells: dict[str, RenderedCell] = {}
     for blk in cell_blocks:
         cfg = configs[blk.name]
-        sql, rec = render_sql(blk.name, blk.sql, cfg, sinks, root)
-        deps = list(cfg.depends_on)
-        for dep in deps:
-            if dep not in configs:
-                raise ConfigError(f"cell {blk.name!r}: unknown cell {dep!r} in depends_on")
-        for edge in rec.edges:
-            if edge not in deps:
-                deps.append(edge)
-        extensions = list(dict.fromkeys([*cfg.extensions, *rec.extensions]))
+        try:
+            sql, rec = render_sql(blk.name, blk.sql, cfg, sinks, root)
+            deps = list(cfg.depends_on)
+            for dep in deps:
+                if dep not in configs:
+                    raise ConfigError(f"unknown cell {dep!r} in depends_on")
+            for edge in rec.edges:
+                if edge not in deps:
+                    deps.append(edge)
+            extensions = list(dict.fromkeys([*cfg.extensions, *rec.extensions]))
+            engine = resolve_engine(cfg)
+            if engine != "duckdb" and (deps or rec.used_source or extensions):
+                raise ConfigError(
+                    f"uses ref()/source()/@extensions and must run on duckdb, "
+                    f"not {engine!r} (duckdb is the cross-cell conduit)"
+                )
+        except ConfigError as exc:
+            errors.append(_cell_error(blk, exc))
+            continue
         cells[blk.name] = RenderedCell(
             name=blk.name,
             config=cfg,
             sql_raw=blk.sql,
             sql=sql,
             hash=body_hash(blk.sql),
-            engine=resolve_engine(cfg),
+            engine=engine,
             sink_type=resolve_sink_type(cfg),
             depends_on=deps,
             extensions=extensions,
@@ -81,13 +113,8 @@ def compile_text(
             line_end=blk.line_end,
             source=blk.source,
         )
-
-    for cell in cells.values():
-        if cell.engine != "duckdb" and (cell.depends_on or cell.uses_sources or cell.extensions):
-            raise ConfigError(
-                f"cell {cell.name!r} uses ref()/source()/@extensions and must run on duckdb, "
-                f"not {cell.engine!r} (duckdb is the cross-cell conduit)"
-            )
+    if errors:
+        raise ConfigErrorGroup(where, errors)
 
     order = topo_sort(list(cells), {n: c.depends_on for n, c in cells.items()})
     project = Project(
