@@ -13,7 +13,7 @@ from .compiler import Project, compile_file
 from .errors import QsqlError
 from .graph import downstream
 from .models import RunResult
-from .runner import run_project
+from .runner import RunSession, run_project
 
 
 def hashes_of(project: Project) -> dict[str, str]:
@@ -42,10 +42,15 @@ def run_changed(
     path: Path | str,
     old_hashes: dict[str, str],
     overrides: dict[str, Any] | None = None,
+    session: RunSession | None = None,
 ) -> tuple[Project, list[RunResult]]:
     project = compile_file(path, overrides)
     to_run = plan_rerun(old_hashes, project)
-    results = run_project(project, select=to_run, closure=False) if to_run else []
+    results = (
+        run_project(project, select=to_run, closure=False, session=session)
+        if to_run
+        else []
+    )
     return project, results
 
 
@@ -62,18 +67,26 @@ def watch_events(
     import watchfiles
 
     path = Path(path)
-    project = compile_file(path, overrides)
-    autorun = [n for n in project.order if project.cells[n].config.autorun]
-    results = run_project(project, select=autorun, closure=False) if autorun else []
-    yield project, results
-    hashes = hashes_of(project)
-    for changes in watchfiles.watch(path.parent, stop_event=stop_event):
-        if not touches(changes, path):
-            continue
-        try:
-            project, results = run_changed(path, hashes, overrides)
-        except QsqlError as exc:
-            yield None, exc
-            continue
-        hashes = hashes_of(project)
+    session = RunSession()  # one conduit for the whole watch, not per rerun
+    try:
+        project = compile_file(path, overrides)
+        autorun = [n for n in project.order if project.cells[n].config.autorun]
+        results = (
+            run_project(project, select=autorun, closure=False, session=session)
+            if autorun
+            else []
+        )
         yield project, results
+        hashes = hashes_of(project)
+        for changes in watchfiles.watch(path.parent, stop_event=stop_event):
+            if not touches(changes, path):
+                continue
+            try:
+                project, results = run_changed(path, hashes, overrides, session=session)
+            except QsqlError as exc:
+                yield None, exc
+                continue
+            hashes = hashes_of(project)
+            yield project, results
+    finally:
+        session.close()

@@ -52,7 +52,8 @@ first `@cell`) inherited by every cell.
 - `sources.py` — file reader registry (csv/parquet/json/excel)
 - `graph.py` — topo sort, cycle detection, downstream sets
 - `compiler.py` — parse → config → render → graph ⇒ `Project`
-- `runner.py` — topo run; per-cell executor+sink; plugin run-chain; conduit connection
+- `runner.py` — topo run; per-cell executor+sink; plugin run-chain; RunSession holds
+  the conduit connection + extension cache across watch/TUI reruns
 - `executors/`, `sinks/` — strategy leaves (duckdb/sqlite/bigquery; parquet/duckdb/postgres)
 - `scaffold.py`, `cli.py`, `watcher.py`, `sheet.py` + `tui.py` — CLI, watch loop, TUI
 

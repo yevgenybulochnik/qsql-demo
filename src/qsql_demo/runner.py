@@ -43,10 +43,47 @@ def _load_extension(conn: Any, ext: str) -> None:
         conn.execute(f"LOAD {ext}")
 
 
-def _conduit(project: Project) -> Any:
-    spec = (project.config.input or {}).get("duckdb")
-    path = spec.get("path") if isinstance(spec, dict) else spec
-    return duckdb.connect(str(project.root / path) if path else ":memory:")
+def _load_ext_cached(ctx: RunContext, ext: str) -> None:
+    if ext not in ctx.ext_cache:
+        _load_extension(ctx.conn, ext)
+        ctx.ext_cache.add(ext)
+
+
+class RunSession:
+    """Reusable conduit state across runs: connection, temp dir, extension cache.
+
+    watch/TUI pass one session so reruns skip reconnect/re-LOAD; the conduit
+    reconnects automatically when the project's target database changes.
+    Without a session, run_project creates and closes a private one per run.
+    """
+
+    def __init__(self) -> None:
+        self.conn: Any = None
+        self.tmpdir: str | None = None
+        self.loaded_extensions: set[str] = set()
+        self._target: str | None = None
+
+    def conduit(self, project: Project) -> Any:
+        spec = (project.config.input or {}).get("duckdb")
+        path = spec.get("path") if isinstance(spec, dict) else spec
+        target = str(project.root / path) if path else ":memory:"
+        if self.conn is None or target != self._target:
+            if self.conn is not None:
+                self.conn.close()
+            self.conn = duckdb.connect(target)
+            self._target = target
+            self.loaded_extensions = set()
+        return self.conn
+
+    def close(self) -> None:
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+            self._target = None
+        if self.tmpdir:
+            shutil.rmtree(self.tmpdir, ignore_errors=True)
+            self.tmpdir = None
+        self.loaded_extensions = set()
 
 
 def _selection(project: Project, select: list[str] | None, closure: bool) -> list[str]:
@@ -76,11 +113,11 @@ def base_runner(project: Project) -> Inner:
         try:
             sink = make_sink(cell.config, ctx.root)
             for ext in (*cell.extensions, *sink.requires):
-                _load_extension(ctx.conn, ext)
+                _load_ext_cached(ctx, ext)
             for upstream in cell.depends_on:
                 up_sink = make_sink(project.cells[upstream].config, ctx.root)
                 for ext in up_sink.requires:
-                    _load_extension(ctx.conn, ext)
+                    _load_ext_cached(ctx, ext)
                 up_sink.prepare(ctx.conn)
             sink.prepare(ctx.conn)
             view = EXECUTORS.get(cell.engine).execute(cell, ctx)
@@ -120,11 +157,20 @@ def _wrap(plug: Any, inner: Inner) -> Inner:
 
 
 def run_project(
-    project: Project, select: list[str] | None = None, closure: bool = True
+    project: Project,
+    select: list[str] | None = None,
+    closure: bool = True,
+    session: RunSession | None = None,
 ) -> list[RunResult]:
-    conn = _conduit(project)
+    owns_session = session is None
+    session = session or RunSession()
     ctx = RunContext(
-        conn=conn, root=project.root, overrides=project.overrides, config=project.config
+        conn=session.conduit(project),
+        root=project.root,
+        overrides=project.overrides,
+        config=project.config,
+        tmpdir=session.tmpdir,
+        ext_cache=session.loaded_extensions,
     )
     chain = build_chain(project)
     results: list[RunResult] = []
@@ -139,9 +185,9 @@ def run_project(
             results.append(result)
         _notify(ctx, "after_run", lambda p: p.after_run(project, results))
     finally:
-        conn.close()
-        if ctx.tmpdir:
-            shutil.rmtree(ctx.tmpdir, ignore_errors=True)
+        session.tmpdir = ctx.tmpdir  # adopt a lazily-created temp dir
+        if owns_session:
+            session.close()
     return results
 
 

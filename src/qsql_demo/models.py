@@ -97,3 +97,4 @@ class RunContext:
     log: list[str] = field(default_factory=list)
     config: Any = None
     tmpdir: str | None = None
+    ext_cache: set[str] = field(default_factory=set)

@@ -31,7 +31,7 @@ from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static, T
 from .compiler import Project, compile_file
 from .errors import QsqlError
 from .models import RunResult
-from .runner import run_project
+from .runner import RunSession, run_project
 from .sheet import Sheet
 from .watcher import hashes_of, plan_rerun
 
@@ -74,6 +74,7 @@ class QsqlApp(App):
         self.watch = watch
         self.auto_run = auto_run
         self.project: Project | None = None
+        self.session = RunSession()  # reused across reruns; run worker is exclusive
         self.results: dict[str, RunResult] = {}
         self.running: set[str] = set()
         self.autorun_off: set[str] = set()
@@ -124,6 +125,9 @@ class QsqlApp(App):
             self.action_run_all()
         if self.watch:
             self._watch_worker()
+
+    def on_unmount(self) -> None:
+        self.session.close()
 
     # ---------- state helpers ----------
 
@@ -468,7 +472,7 @@ class QsqlApp(App):
             return
         names = select if select is not None else list(project.order)
         self.call_from_thread(self._mark_running, project, names)
-        results = run_project(project, select=select, closure=closure)
+        results = run_project(project, select=select, closure=closure, session=self.session)
         self.call_from_thread(self._apply_results, results)
 
     def _mark_running(self, project: Project, names: list[str]) -> None:
