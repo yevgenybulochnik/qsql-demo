@@ -6,6 +6,7 @@ import pytest
 from qsql_demo.compiler import compile_text
 from qsql_demo.plugins.base import Plugin
 from qsql_demo.registry import plugin
+from qsql_demo.runner import RunSession, run_project
 
 
 def test_run_lands_parquet_and_previews(tmp_path) -> None:
@@ -91,6 +92,61 @@ def test_extensions_directive_is_loaded_by_runner(tmp_path) -> None:
     )
     results = project.run()
     assert results[0].ok, results[0].error
+
+
+def test_session_reuses_conduit_across_runs(tmp_path) -> None:
+    project = compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+    session = RunSession()
+    try:
+        assert run_project(project, session=session)[0].ok
+        first_conn = session.conn
+        assert first_conn is not None
+        assert run_project(project, session=session)[0].ok
+        assert session.conn is first_conn  # no reconnect between runs
+    finally:
+        session.close()
+    assert session.conn is None
+
+
+def test_session_reconnects_when_conduit_target_changes(tmp_path) -> None:
+    in_memory = compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+    on_disk = compile_text(
+        "/*@ input: { duckdb: wh.db } */\n-- @cell a\nSELECT 1 AS x;", root=tmp_path
+    )
+    session = RunSession()
+    try:
+        run_project(in_memory, session=session)
+        first_conn = session.conn
+        run_project(on_disk, session=session)
+        assert session.conn is not first_conn
+        assert (tmp_path / "wh.db").exists()
+    finally:
+        session.close()
+
+
+def test_session_caches_extension_loads(tmp_path, monkeypatch) -> None:
+    import qsql_demo.runner as runner_mod
+
+    loads: list[str] = []
+    original = runner_mod._load_extension
+    monkeypatch.setattr(
+        runner_mod, "_load_extension",
+        lambda conn, ext: (loads.append(ext), original(conn, ext))[1],
+    )
+    project = compile_text("-- @cell a\n-- @extensions: [json]\nSELECT 1;", root=tmp_path)
+    session = RunSession()
+    try:
+        assert run_project(project, session=session)[0].ok
+        assert run_project(project, session=session)[0].ok
+    finally:
+        session.close()
+    assert loads.count("json") == 1  # second run hits the session cache
+
+
+def test_without_session_each_run_owns_its_connection(tmp_path) -> None:
+    project = compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+    assert project.run()[0].ok
+    assert project.run()[0].ok  # independent runs still work
 
 
 def test_chain_wraps_outermost_first(tmp_path) -> None:
