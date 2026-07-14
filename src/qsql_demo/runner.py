@@ -129,6 +129,7 @@ def run_project(
     chain = build_chain(project)
     results: list[RunResult] = []
     try:
+        _notify(ctx, "before_run", lambda p: p.before_run(project, ctx))
         for name in _selection(project, select, closure):
             cell = project.cells[name]
             try:
@@ -136,8 +137,18 @@ def run_project(
             except Exception:  # a buggy plugin must not kill the run
                 result = RunResult(cell=name, ok=False, error=traceback.format_exc())
             results.append(result)
+        _notify(ctx, "after_run", lambda p: p.after_run(project, results))
     finally:
         conn.close()
         if ctx.tmpdir:
             shutil.rmtree(ctx.tmpdir, ignore_errors=True)
     return results
+
+
+def _notify(ctx: RunContext, hook: str, call: Callable[[Any], None]) -> None:
+    """Fire-and-forget lifecycle notifications: failures are logged, never fatal."""
+    for plug in PLUGINS.overriding(hook):
+        try:
+            call(plug)
+        except Exception:
+            ctx.log.append(f"plugin {plug.name!r} {hook} failed:\n{traceback.format_exc()}")

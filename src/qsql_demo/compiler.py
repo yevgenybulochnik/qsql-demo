@@ -88,7 +88,7 @@ def compile_text(
             )
 
     order = topo_sort(list(cells), {n: c.depends_on for n, c in cells.items()})
-    return Project(
+    project = Project(
         root=root,
         path=path,
         config=global_cfg,
@@ -97,6 +97,11 @@ def compile_text(
         order=order,
         overrides=overrides,
     )
+    from .registry import PLUGINS
+
+    for plug in PLUGINS.overriding("after_compile"):
+        plug.after_compile(project)  # a validation seam: raising rejects the compile
+    return project
 
 
 def compile_file(path: Path | str, overrides: dict[str, Any] | None = None) -> Project:
