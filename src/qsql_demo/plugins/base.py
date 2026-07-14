@@ -36,5 +36,45 @@ class Plugin:
     priority: ClassVar[int] = 0
     Config: ClassVar[type[BaseModel]] = EmptyConfig
 
+    # -- execution wrapper (owns control flow: retry, skip, transform) --------
     def run(self, cell: RenderedCell, ctx: RunContext, inner: Inner) -> RunResult:
-        return inner(cell, ctx)
+        """Default: delegate to the before/after sugar. Override for control
+        flow (retries, caching); override the sugar for simple observation."""
+        self.before_execute(cell, ctx)
+        result = inner(cell, ctx)
+        replaced = self.after_execute(cell, ctx, result)
+        return result if replaced is None else replaced
+
+    def before_execute(self, cell: RenderedCell, ctx: RunContext) -> None:
+        """Observation hook before the cell executes."""
+
+    def after_execute(
+        self, cell: RenderedCell, ctx: RunContext, result: RunResult
+    ) -> RunResult | None:
+        """Observation hook after the cell executes; return a RunResult to
+        replace it, or None to keep it."""
+        return None
+
+    # -- render seams (compile time) ------------------------------------------
+    def render_context(self, name: str, config: Any, context: dict[str, Any]) -> dict[str, Any]:
+        """Add Jinja globals for a cell's SQL body. Core globals (ref/source/
+        var/env) are applied after all plugins and always win on collision."""
+        return context
+
+    def after_render(self, name: str, config: Any, sql: str) -> str | None:
+        """Transform a cell's rendered SQL; return the new SQL, or None to
+        keep it. Transformers compose in (priority, registration) order."""
+        return None
+
+    # -- lifecycle notifications -----------------------------------------------
+    def after_compile(self, project: Any) -> None:
+        """Inspect/validate the compiled Project; raising rejects the compile."""
+
+    def before_run(self, project: Any, ctx: RunContext) -> None:
+        """Called once before the first cell of a run; failures are contained."""
+
+    def after_run(self, project: Any, results: list[RunResult]) -> None:
+        """Called once after the run completes; failures are contained."""
+
+
+RUN_HOOKS = ("run", "before_execute", "after_execute")

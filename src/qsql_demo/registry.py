@@ -95,14 +95,26 @@ class PluginRegistry(Registry):
     def by_scope(self, *scopes: Scope) -> list[Plugin]:
         return [p for p in self.values() if p.scope in scopes]
 
-    def chain(self) -> list[Plugin]:
-        """Plugins overriding `run`, outermost first (priority, then registration)."""
+    def overriding(self, method: str) -> list[Plugin]:
+        """Plugins overriding a base hook, in (priority, registration) order."""
         from .plugins.base import Plugin
+
+        base = getattr(Plugin, method)
+        hooked = [
+            (p.priority, i, p)
+            for i, p in enumerate(self.values())
+            if getattr(type(p), method) is not base
+        ]
+        return [p for _, _, p in sorted(hooked, key=lambda t: (t[0], t[1]))]
+
+    def chain(self) -> list[Plugin]:
+        """Plugins participating in the execution chain, outermost first."""
+        from .plugins.base import RUN_HOOKS, Plugin
 
         hooked = [
             (p.priority, i, p)
             for i, p in enumerate(self.values())
-            if type(p).run is not Plugin.run
+            if any(getattr(type(p), m) is not getattr(Plugin, m) for m in RUN_HOOKS)
         ]
         return [p for _, _, p in sorted(hooked, key=lambda t: (t[0], t[1]))]
 
