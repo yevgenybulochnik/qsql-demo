@@ -31,6 +31,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "openpyxl>=3.1",
+    "pyarrow>=15",  # arrow-type normalization tests only; core stays pyarrow-free
 ]
 
 [tool.pytest.ini_options]

@@ -1165,6 +1165,7 @@ visidata = [
 [package.dev-dependencies]
 dev = [
     { name = "openpyxl" },
+    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -1190,6 +1191,7 @@ provides-extras = ["bigquery", "postgres", "visidata"]
 [package.metadata.requires-dev]
 dev = [
     { name = "openpyxl", specifier = ">=3.1" },
+    { name = "pyarrow", specifier = ">=15" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
 ]

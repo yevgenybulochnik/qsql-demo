@@ -36,8 +36,33 @@ def register_frame(ctx: RunContext, view: str, frame: Any) -> str:
             f'CREATE OR REPLACE TEMP VIEW "{view}" AS SELECT * FROM read_parquet(\'{tmp}\')'
         )
     else:
-        ctx.conn.register(view, frame)
+        ctx.conn.register(view, _normalize_arrow(ctx, frame))
     return view
+
+
+def _normalize_arrow(ctx: RunContext, frame: Any) -> Any:
+    """duckdb cannot scan decimal256 (BigQuery BIGNUMERIC) at any precision:
+    downcast to decimal128 when the precision fits DECIMAL(38), else cast to
+    string — lossless text, since no duckdb decimal can hold the value."""
+    try:
+        import pyarrow as pa
+    except ImportError:
+        return frame
+    if not isinstance(frame, pa.Table):
+        return frame
+    for index, fld in enumerate(frame.schema):
+        if not isinstance(fld.type, pa.Decimal256Type):
+            continue
+        if fld.type.precision <= 38:
+            target = pa.decimal128(fld.type.precision, fld.type.scale)
+        else:
+            target = pa.string()
+            ctx.log.append(
+                f"column {fld.name!r}: decimal256({fld.type.precision},{fld.type.scale}) "
+                f"exceeds duckdb's DECIMAL(38); cast to string"
+            )
+        frame = frame.set_column(index, fld.name, frame.column(index).cast(target))
+    return frame
 
 
 class Executor(ABC):
