@@ -167,6 +167,30 @@ def compile_cmd(
 
 
 @app.command()
+def explain(
+    file: Path = FILE_ARG,
+    set_: Optional[list[str]] = SET_OPT,
+    plugins: Optional[list[str]] = PLUGINS_OPT,
+) -> None:
+    """Show the effective plugin chain and hook participants for this project."""
+    from .registry import PLUGINS
+
+    project = _project(file, set_, plugins)
+
+    def names(plugs: list) -> str:
+        return " → ".join(f"{p.name}({p.priority})" for p in plugs) or "(none)"
+
+    typer.echo(f"run chain:      {names(PLUGINS.chain())} → [execute on engine, land via sink]")
+    for hook in ("render_context", "after_render", "after_compile", "before_run", "after_run"):
+        typer.echo(f"{hook + ':':<16}{names(PLUGINS.overriding(hook))}")
+    typer.echo("cells:")
+    for name in project.order:
+        cell = project.cells[name]
+        deps = ", ".join(cell.depends_on) or "-"
+        typer.echo(f"  {name:<24} {cell.engine} → {cell.sink_type}  deps: {deps}")
+
+
+@app.command()
 def watch(
     file: Path = FILE_ARG,
     set_: Optional[list[str]] = SET_OPT,

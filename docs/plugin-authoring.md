@@ -46,12 +46,19 @@ class RowLimit(Plugin):
 
 ## The run chain
 
-`runner` wraps the base cell-runner with every plugin that overrides `run`, sorted by
-`(priority, registration order)`; lower priority = outermost. Convention:
+`runner` wraps the base cell-runner with every plugin participating in execution,
+sorted by `(priority, registration order)`; lower priority = outermost. Convention:
 
 - **retries** (outermost, ~-100) — re-invoke `inner` when the result has `ok=False`
 - **caching** (~-50) — skip `inner` entirely and return a synthesized result
 - **timing/logging** (~0) — observe around `inner`
+
+Two ways in:
+
+- **Sugar** — override `before_execute(cell, ctx)` / `after_execute(cell, ctx, result)`
+  for observation; `after_execute` may return a replacement result (None keeps it).
+- **Full control** — override `run(cell, ctx, inner)` to own control flow: call
+  `inner` zero or more times (caching, retries), transform the result.
 
 Cell failures arrive as `RunResult(ok=False, error=...)`, so retry-style plugins can
 inspect them; exceptions your plugin raises are caught outside the chain and degrade
@@ -59,6 +66,29 @@ that cell to an error result without killing the run. Builtin `EmitSql`
 (`plugins/emit_sql.py`) is the reference implementation: global `render_dir` config +
 a `run` hook that writes each cell's rendered SQL before delegating —
 `qsql run --set render_dir=build/sql`.
+
+## Render seams (compile time)
+
+- `render_context(name, config, context) -> context` — add Jinja globals/filters for
+  SQL bodies (macro libraries, helpers). Core globals (`ref`/`source`/`var`/`env`)
+  apply after all plugins and always win on collision — they record side-channel
+  state (edges, extensions) a replacement couldn't.
+- `after_render(name, config, sql) -> sql | None` — transform rendered SQL; return
+  None to keep it. Transformers compose in `(priority, registration)` order. Builtin
+  `DevLimit` (`plugins/dev_limit.py`) is the reference: `--set dev_limit=100` wraps
+  every cell in a LIMIT; a cell opts out with `-- @dev_limit: null`.
+
+## Lifecycle hooks
+
+- `after_compile(project)` — inspect the compiled Project; **raising rejects the
+  compile**, making this the seam for cross-DAG validation (naming rules, required
+  tags, forbidden refs).
+- `before_run(project, ctx)` / `after_run(project, results)` — fire-and-forget
+  notifications around the run loop (setup, summaries, alerts); failures are logged
+  to `ctx.log`, never fatal.
+
+`qsql explain [file]` prints the effective run chain and every hook's participants —
+the runtime order is registry state, and this makes it readable.
 
 ## Other extension points
 

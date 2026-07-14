@@ -18,9 +18,13 @@ first `@cell`) inherited by every cell.
 - **Everything is a plugin.** `@plugin` / `@executor` / `@source_reader` / `@sink`
   decorators register into registries (`registry.py`). A `Plugin` bundles a pydantic
   `Config` (its fields become directives; validators run on merged config; merge
-  strategy rides on fields via `qfield`) and an optional `run(cell, ctx, inner)` hook
-  that decorates cell execution (lower `priority` = outermore). `config.build_models`
-  composes all plugin Configs into GlobalConfig/CellConfig via `create_model`.
+  strategy rides on fields via `qfield`) with behavior hooks (lower `priority` =
+  outermore): `run(cell, ctx, inner)` wraps execution (or the simpler
+  `before_execute`/`after_execute`); `render_context`/`after_render` are compile-time
+  render seams (core Jinja globals always win); `after_compile` may raise to reject a
+  compile; `before_run`/`after_run` are contained notifications. `qsql explain` prints
+  the effective chain/hook order. `config.build_models` composes all plugin Configs
+  into GlobalConfig/CellConfig via `create_model`.
 - **Config resolution:** global → cell → run overrides (`--set k.v=x`, `QSQL_K__V=x`),
   per-field merge strategy (OVERRIDE / DEEP / EXTEND). Config values are literal; Jinja
   applies to SQL bodies only.

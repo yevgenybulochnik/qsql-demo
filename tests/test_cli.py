@@ -101,6 +101,18 @@ def test_compile_error_reported(tmp_path) -> None:
     assert "unknown directive" in result.output
 
 
+def test_explain_shows_chain_hooks_and_cells(tmp_path) -> None:
+    f = _init(tmp_path)
+    result = runner.invoke(app, ["explain", str(f)])
+    assert result.exit_code == 0, result.output
+    assert "run chain" in result.output
+    assert "emit_sql(-100)" in result.output   # builtin wrapper, with priority
+    assert "after_render" in result.output
+    assert "dev_limit" in result.output        # builtin transformer
+    assert "users" in result.output            # cells listed with engine -> sink
+    assert "duckdb → parquet" in result.output
+
+
 PLUGIN_MODULE = """\
 from pydantic import BaseModel
 
