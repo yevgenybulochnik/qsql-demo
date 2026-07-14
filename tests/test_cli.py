@@ -75,7 +75,7 @@ def test_show_prints_rendered_sql(tmp_path) -> None:
     f = _init(tmp_path)
     result = runner.invoke(app, ["show", "active_user_events", str(f)])
     assert result.exit_code == 0, result.output
-    assert "read_parquet" in result.output
+    assert "FROM users" in result.output  # same-context ref: bare temp name
     assert "{{" not in result.output
 
 

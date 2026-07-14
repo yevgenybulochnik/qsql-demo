@@ -149,6 +149,52 @@ def test_without_session_each_run_owns_its_connection(tmp_path) -> None:
     assert project.run()[0].ok  # independent runs still work
 
 
+def test_context_keys_annotate_cells(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell a\nSELECT 1 AS x;\n"
+        "-- @cell b\n/*@ input: { sqlite: legacy.db } */\nSELECT 2 AS x;\n"
+        "-- @cell c\n/*@ input: { bigquery: { project: p } } */\nSELECT 3 AS x;",
+        root=tmp_path,
+    )
+    assert project.cells["a"].context == "duckdb::memory:"
+    assert project.cells["b"].context == "sqlite:legacy.db"
+    assert project.cells["c"].context == "bigquery:p"
+
+
+def test_same_context_run_lands_parent_and_child(tmp_path) -> None:
+    # single execution, two consumers: the child reads the temp table while
+    # the parent's parquet still lands for previews/VisiData
+    project = compile_text(
+        "-- @cell parent\nSELECT * FROM range(5) t(n);\n"
+        "-- @cell child\nSELECT count(*) AS c FROM {{ ref('parent') }};",
+        root=tmp_path,
+    )
+    results = {r.cell: r for r in project.run()}
+    assert all(r.ok for r in results.values()), [r.error for r in results.values()]
+    assert results["child"].rows == 1
+    assert pl.read_parquet(tmp_path / "data" / "parent.parquet").height == 5
+    assert pl.read_parquet(tmp_path / "data" / "child.parquet")["c"][0] == 5
+
+
+def test_exact_selection_expands_through_missing_temps(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell parent\nSELECT 1 AS x;\n"
+        "-- @cell child\nSELECT * FROM {{ ref('parent') }};",
+        root=tmp_path,
+    )
+    fresh = RunSession()
+    try:  # cold session: the temp doesn't exist, so the parent must rerun
+        results = run_project(project, select=["child"], closure=False, session=fresh)
+        assert [r.cell for r in results] == ["parent", "child"]
+        assert all(r.ok for r in results)
+        # warm session: the temp is live, exact selection stays exact
+        results = run_project(project, select=["child"], closure=False, session=fresh)
+        assert [r.cell for r in results] == ["child"]
+        assert results[0].ok, results[0].error
+    finally:
+        fresh.close()
+
+
 def test_chain_wraps_outermost_first(tmp_path) -> None:
     calls: list[str] = []
 

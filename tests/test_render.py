@@ -24,20 +24,35 @@ def test_render_context_capability_verbs(tmp_path) -> None:
     assert rctx.resolve_path("/abs/x.csv") == "/abs/x.csv"
 
 
-def test_ref_emits_producer_parquet_ref_expr_and_edge(tmp_path) -> None:
+def test_same_context_ref_is_a_bare_temp_table_name(tmp_path) -> None:
     project = compile_text(
         "-- @cell users\nSELECT 1 AS id;\n"
         "-- @cell active\nSELECT * FROM {{ ref('users') }};",
         root=tmp_path,
     )
     active = project.cells["active"]
-    assert f"read_parquet('{tmp_path}/data/users.parquet')" in active.sql
+    assert "FROM users" in active.sql          # in-engine, dialect-neutral
+    assert "read_parquet" not in active.sql    # no conduit round-trip
     assert active.depends_on == ["users"]
+    assert active.context_refs == ["users"]
+    assert project.cells["users"].reffed_in_context
 
 
-def test_ref_uses_the_producers_own_sink(tmp_path) -> None:
+def test_cross_context_ref_emits_producer_parquet_ref_expr(tmp_path) -> None:
     project = compile_text(
-        "-- @cell landed\n"
+        "-- @cell legacy\n-- @engine: sqlite\nSELECT 1 AS id;\n"
+        "-- @cell active\nSELECT * FROM {{ ref('legacy') }};",
+        root=tmp_path,
+    )
+    active = project.cells["active"]
+    assert f"read_parquet('{tmp_path}/data/legacy.parquet')" in active.sql
+    assert active.external_refs == ["legacy"]
+    assert not project.cells["legacy"].reffed_in_context
+
+
+def test_cross_context_ref_uses_the_producers_own_sink(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell landed\n-- @engine: sqlite\n"
         "-- @output: { type: duckdb, path: wh.db }\n"
         "SELECT 1 AS id;\n"
         "-- @cell reader\nSELECT * FROM {{ ref('landed') }};",
