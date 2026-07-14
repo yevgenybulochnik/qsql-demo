@@ -56,10 +56,12 @@ class NotebookPicker(ModalScreen):
         self.create_name = create_name
 
     def compose(self) -> ComposeResult:
-        options = [
-            Option(f"open    {f.name}", id=f"open:{f}")
-            for f in sorted(self.directory.glob("*.qsql")) + sorted(self.directory.glob("*.sql"))
-        ]
+        # notebooks only: .qsql, or .qsql.sql for editors that want SQL
+        # highlighting — plain .sql files (dumps, migrations) are noise here
+        notebooks = sorted(self.directory.glob("*.qsql")) + sorted(
+            self.directory.glob("*.qsql.sql")
+        )
+        options = [Option(f"open    {f.name}", id=f"open:{f}") for f in notebooks]
         if self.create_name:
             options.append(
                 Option(f"create  {self.create_name} — starter template", id=f"template:{self.create_name}")

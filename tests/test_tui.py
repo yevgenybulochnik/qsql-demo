@@ -42,6 +42,25 @@ async def test_missing_file_picker_lists_existing_notebooks(tmp_path) -> None:
         assert not (tmp_path / "base.qsql").exists()  # nothing was scaffolded
 
 
+async def test_picker_lists_qsql_and_qsql_sql_but_ignores_plain_sql(tmp_path) -> None:
+    from textual.widgets import OptionList
+
+    from qsql_demo.tui import NotebookPicker
+
+    (tmp_path / "pipeline.qsql").write_text("-- @cell a\nSELECT 1;\n")
+    (tmp_path / "legacy.qsql.sql").write_text("-- @cell b\nSELECT 2;\n")
+    (tmp_path / "schema_dump.sql").write_text("CREATE TABLE noise (id INT);\n")
+    app = QsqlApp(path=tmp_path / "base.qsql", watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, NotebookPicker)
+        ol = app.screen.query_one(OptionList)
+        prompts = [str(ol.get_option_at_index(i).prompt) for i in range(ol.option_count)]
+        assert any("pipeline.qsql" in p for p in prompts)
+        assert any("legacy.qsql.sql" in p for p in prompts)
+        assert not any("schema_dump.sql" in p for p in prompts)
+
+
 async def test_o_switches_between_notebooks_and_resets_state(tmp_path) -> None:
     from qsql_demo.tui import NotebookPicker
 
