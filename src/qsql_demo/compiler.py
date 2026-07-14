@@ -78,6 +78,8 @@ def compile_text(
             extensions=extensions,
             uses_sources=rec.used_source,
             line=blk.line,
+            line_end=blk.line_end,
+            source=blk.source,
         )
 
     for cell in cells.values():

@@ -51,12 +51,14 @@ class _Block:
         self.directives: dict[str, Any] = {}
         self.sql_lines: list[str] = []
 
-    def finish(self) -> RawBlock:
+    def finish(self, line_end: int, lines: list[str]) -> RawBlock:
         return RawBlock(
             name=self.name,
             directives=self.directives,
             sql="\n".join(self.sql_lines).strip("\n"),
             line=self.line,
+            line_end=line_end,
+            source="\n".join(lines[self.line - 1 : line_end]),
         )
 
 
@@ -114,7 +116,8 @@ def parse_text(text: str) -> list[RawBlock]:
         blocks[-1].sql_lines.append(line)
         i += 1
     flush_group()
-    return [b.finish() for b in blocks]
+    ends = [b.line - 1 for b in blocks[1:]] + [len(lines)]
+    return [b.finish(end, lines) for b, end in zip(blocks, ends)]
 
 
 def parse_file(path: str | Path) -> list[RawBlock]:

@@ -26,12 +26,18 @@ class Merge(str, Enum):
 
 @dataclass
 class RawBlock:
-    """A parsed chunk of the file: the global header (name=None) or one cell."""
+    """A parsed chunk of the file: the global header (name=None) or one cell.
+
+    ``sql`` is the directive-stripped body; ``source`` is the untouched slice
+    of the file (directives included) spanning lines ``line``..``line_end``.
+    """
 
     name: str | None
     directives: dict[str, Any]
     sql: str
     line: int
+    line_end: int = 0
+    source: str = ""
 
 
 @dataclass
@@ -60,6 +66,8 @@ class RenderedCell:
     extensions: list[str] = field(default_factory=list)
     uses_sources: bool = False
     line: int = 0
+    line_end: int = 0
+    source: str = ""
 
 
 @dataclass

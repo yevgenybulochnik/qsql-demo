@@ -175,7 +175,7 @@ class QsqlApp(App):
         if not name or not self.project:
             return
         cell = self.project.cells[name]
-        sql = cell.sql if self.show_rendered else cell.sql_raw
+        sql = cell.sql if self.show_rendered else (cell.source or cell.sql_raw)
         label = "rendered" if self.show_rendered else "source"
         self.query_one("#sql_view", Static).update(
             Syntax(sql, "sql", line_numbers=True, word_wrap=True)
