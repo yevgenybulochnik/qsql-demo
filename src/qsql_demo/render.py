@@ -16,6 +16,7 @@ from typing import Any, Mapping
 from jinja2 import Environment, StrictUndefined, TemplateError
 
 from .errors import ConfigError
+from .registry import PLUGINS
 from .sinks.base import Sink
 from .sources import reader_for
 
@@ -81,11 +82,23 @@ def render_sql(
     def env(key: str, default: str = "") -> str:
         return os.environ.get(key, default)
 
+    context: dict[str, Any] = {"vars": config.vars, "config": config}
+    for plug in PLUGINS.overriding("render_context"):
+        updated = plug.render_context(name, config, context)
+        if updated is not None:
+            context = updated
+    # core globals apply last: plugins may add, never shadow (ref/source carry
+    # side-channel state a replacement could not)
+    context.update(ref=ref, source=source, var=var, env=env)
+
     jinja = Environment(undefined=StrictUndefined, keep_trailing_newline=True)
     try:
-        sql = jinja.from_string(sql_raw).render(
-            ref=ref, source=source, var=var, env=env, vars=config.vars, config=config
-        )
+        sql = jinja.from_string(sql_raw).render(**context)
     except TemplateError as exc:
         raise ConfigError(f"cell {name!r}: template error: {exc}") from exc
+
+    for plug in PLUGINS.overriding("after_render"):
+        out = plug.after_render(name, config, sql)
+        if out is not None:
+            sql = out
     return sql, rec
