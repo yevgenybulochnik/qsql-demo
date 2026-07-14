@@ -41,11 +41,14 @@ def path_alias(prefix: str, key: str) -> str:
 
 
 def make_sink(config: Any, root: Path) -> Sink:
-    """Build the sink for a cell's merged config (output + schema fallback)."""
+    """Build a cell's sink: output config amended by sink_config hooks
+    (e.g. the Schema plugin injecting its directive)."""
     from ..config import resolve_sink_type
-    from ..registry import SINKS
+    from ..registry import PLUGINS, SINKS
 
     cfg = dict(config.output or {})
-    if "schema" not in cfg and getattr(config, "schema_", None):
-        cfg["schema"] = config.schema_
+    for plug in PLUGINS.overriding("sink_config"):
+        amended = plug.sink_config(config, cfg)
+        if amended is not None:
+            cfg = amended
     return SINKS.get(resolve_sink_type(config))(cfg, root)

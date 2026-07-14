@@ -21,6 +21,8 @@ _MISSING = object()
 
 @plugin
 class Engine(Plugin):
+    """The engine: directive; answers engine resolution for explicit settings."""
+
     class Config(BaseModel):
         engine: str | None = qfield(None)
 
@@ -33,11 +35,26 @@ class Engine(Plugin):
                 )
             return v
 
+    def resolve_engine(self, config: Any) -> str | None:
+        return config.engine or None
+
 
 @plugin
 class Input(Plugin):
+    """The input: directive; infers the engine from its sole top-level key."""
+
     class Config(BaseModel):
         input: dict[str, Any] = qfield({}, merge=Merge.DEEP)
+
+    def resolve_engine(self, config: Any) -> str | None:
+        inp = getattr(config, "input", None) or {}
+        if len(inp) == 1:
+            return next(iter(inp))
+        if len(inp) > 1:
+            raise ConfigError(
+                f"cannot infer engine from input keys {list(inp)}; set @engine explicitly"
+            )
+        return None
 
 
 @plugin
@@ -81,12 +98,26 @@ class Sources(Plugin):
 
 @plugin
 class Extensions(Plugin):
+    """The extensions: directive plus loading them on the conduit before a
+    cell executes (config-declared ∪ render-collected)."""
+
     class Config(BaseModel):
         extensions: list[str] = qfield([], merge=Merge.EXTEND)
+
+    def before_execute(self, cell: Any, ctx: Any) -> None:
+        from ..runner import _load_ext_cached
+
+        for ext in cell.extensions:
+            _load_ext_cached(ctx, ext)
 
 
 @plugin
 class Output(Plugin):
+    """The output: directive; answers sink resolution from output.type."""
+
+    def resolve_sink(self, config: Any) -> str | None:
+        return (config.output or {}).get("type")
+
     class Config(BaseModel):
         output: dict[str, Any] = qfield({"type": "parquet", "dir": "data/"}, merge=Merge.DEEP)
 
@@ -103,8 +134,13 @@ class Output(Plugin):
 
 @plugin
 class Autorun(Plugin):
+    """The autorun: directive plus the watch-mode rerun filter it drives."""
+
     class Config(BaseModel):
         autorun: bool = qfield(True)
+
+    def should_rerun(self, cell: Any) -> bool | None:
+        return bool(cell.config.autorun)
 
 
 @plugin
@@ -152,16 +188,28 @@ class Env(Plugin):
 
 @plugin
 class DependsOn(Plugin):
+    """The depends_on: directive plus contributing its explicit edges."""
+
     scope = Scope.CELL
 
     class Config(BaseModel):
         depends_on: list[str] = qfield([], merge=Merge.EXTEND)
 
+    def collect_edges(self, name: str, config: Any) -> list[str] | None:
+        return list(config.depends_on)
+
 
 @plugin
 class Schema(Plugin):
+    """The schema: directive plus injecting it into DB sink configs."""
+
     class Config(BaseModel):
         schema_: str | None = qfield(None, alias="schema")
+
+    def sink_config(self, config: Any, cfg: dict[str, Any]) -> dict[str, Any] | None:
+        if "schema" not in cfg and getattr(config, "schema_", None):
+            return {**cfg, "schema": config.schema_}
+        return None
 
 
 @plugin

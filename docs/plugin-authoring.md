@@ -82,6 +82,22 @@ a `run` hook that writes each cell's rendered SQL before delegating —
   `DevLimit` (`plugins/dev_limit.py`) is the reference: `--set dev_limit=100` wraps
   every cell in a LIMIT; a cell opts out with `-- @dev_limit: null`.
 
+## Decision & aggregation hooks
+
+Every builtin directive owns its behavior through one of these:
+
+- `resolve_engine(config) -> str | None` / `resolve_sink(config) -> str | None` —
+  **first-result** decisions: plugins are asked in `(priority, registration)` order,
+  the first non-None answer wins, and core defaults (duckdb / parquet) apply last.
+  Engine answers for an explicit `@engine`; Input infers from its sole input key.
+- `should_rerun(cell) -> bool | None` — first-result watch-mode filter (the Autorun
+  plugin answers from `@autorun`; default when nobody answers: rerun).
+- `collect_edges(name, config) -> list[str] | None` — dependency edges, unioned
+  across plugins (DependsOn contributes `@depends_on`; `ref()` edges come from the
+  render seam).
+- `sink_config(config, cfg) -> dict | None` — amend the sink's config dict before the
+  sink is built (Schema injects `@schema` into DB sinks).
+
 ## Lifecycle hooks
 
 - `after_compile(project)` — inspect the compiled Project; **raising rejects the

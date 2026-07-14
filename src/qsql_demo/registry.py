@@ -107,6 +107,14 @@ class PluginRegistry(Registry):
         ]
         return [p for _, _, p in sorted(hooked, key=lambda t: (t[0], t[1]))]
 
+    def first_result(self, method: str, *args: Any) -> Any:
+        """Ask plugins in (priority, registration) order; first non-None wins."""
+        for p in self.overriding(method):
+            result = getattr(p, method)(*args)
+            if result is not None:
+                return result
+        return None
+
     def chain(self) -> list[Plugin]:
         """Plugins participating in the execution chain, outermost first."""
         from .plugins.base import RUN_HOOKS, Plugin

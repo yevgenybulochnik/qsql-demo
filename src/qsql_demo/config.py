@@ -137,17 +137,10 @@ def resolve_cell(
 
 
 def resolve_engine(cfg: BaseModel) -> str:
-    if cfg.engine:
-        return cfg.engine
-    inp = cfg.input or {}
-    if len(inp) == 1:
-        return next(iter(inp))
-    if len(inp) > 1:
-        raise ConfigError(
-            f"cannot infer engine from input keys {list(inp)}; set @engine explicitly"
-        )
-    return "duckdb"
+    """First-result decision: Engine answers for explicit @engine, Input infers
+    from its own key; core default is duckdb."""
+    return PLUGINS.first_result("resolve_engine", cfg) or "duckdb"
 
 
 def resolve_sink_type(cfg: BaseModel) -> str:
-    return (cfg.output or {}).get("type", "parquet")
+    return PLUGINS.first_result("resolve_sink", cfg) or "parquet"

@@ -68,6 +68,28 @@ class Plugin:
         keep it. Transformers compose in (priority, registration) order."""
         return None
 
+    # -- decision hooks (first non-None wins; core default applies last) -------
+    def resolve_engine(self, config: Any) -> str | None:
+        """Answer which engine a cell runs on, or None to pass."""
+        return None
+
+    def resolve_sink(self, config: Any) -> str | None:
+        """Answer which sink type a cell lands in, or None to pass."""
+        return None
+
+    def should_rerun(self, cell: RenderedCell) -> bool | None:
+        """Watch-mode filter: should this changed cell rerun? None to pass."""
+        return None
+
+    # -- aggregation/transform hooks -------------------------------------------
+    def collect_edges(self, name: str, config: Any) -> list[str] | None:
+        """Contribute dependency edges for a cell (unioned across plugins)."""
+        return None
+
+    def sink_config(self, config: Any, cfg: dict[str, Any]) -> dict[str, Any] | None:
+        """Amend the sink's config dict before the sink is built; None keeps it."""
+        return None
+
     # -- lifecycle notifications -----------------------------------------------
     def after_compile(self, project: Any) -> None:
         """Inspect/validate the compiled Project; raising rejects the compile."""

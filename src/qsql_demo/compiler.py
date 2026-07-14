@@ -12,6 +12,7 @@ from .errors import CellError, ConfigError, ConfigErrorGroup
 from .graph import topo_sort
 from .models import RawBlock, RenderedCell, RunResult
 from .parser import body_hash, parse_text
+from .registry import PLUGINS
 from .render import render_sql
 from .sinks import make_sink
 
@@ -81,7 +82,11 @@ def compile_text(
         cfg = configs[blk.name]
         try:
             sql, rec = render_sql(blk.name, blk.sql, cfg, sinks, root)
-            deps = list(cfg.depends_on)
+            deps: list[str] = []
+            for plug in PLUGINS.overriding("collect_edges"):
+                for dep in plug.collect_edges(blk.name, cfg) or []:
+                    if dep not in deps:
+                        deps.append(dep)
             for dep in deps:
                 if dep not in configs:
                     raise ConfigError(f"unknown cell {dep!r} in depends_on")
@@ -126,8 +131,6 @@ def compile_text(
         order=order,
         overrides=overrides,
     )
-    from .registry import PLUGINS
-
     for plug in PLUGINS.overriding("after_compile"):
         plug.after_compile(project)  # a validation seam: raising rejects the compile
     return project

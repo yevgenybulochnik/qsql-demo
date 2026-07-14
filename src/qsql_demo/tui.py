@@ -141,7 +141,9 @@ class QsqlApp(App):
     def cell_autorun(self, name: str) -> bool:
         if not self.project:
             return False
-        configured = self.project.cells[name].config.autorun
+        from .watcher import should_rerun
+
+        configured = should_rerun(self.project.cells[name])
         return self.autorun_global and configured and name not in self.autorun_off
 
     def log_line(self, text: str) -> None:

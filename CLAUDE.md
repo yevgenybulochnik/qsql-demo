@@ -23,8 +23,11 @@ first `@cell`) inherited by every cell.
   `before_execute`/`after_execute`); `render_context(rctx)` *contributes* Jinja
   globals under a collision guard (the builtin ref/source/var/env globals are plugin
   contributions; `rctx` is the RenderContext capability: add_edge/producer_expr/
-  require_extensions); `after_render(rctx, sql)` transforms SQL; `after_compile` may
-  raise to reject a compile; `before_run`/`after_run` are contained notifications.
+  require_extensions); `after_render(rctx, sql)` transforms SQL; first-result
+  decision hooks `resolve_engine`/`resolve_sink`/`should_rerun` and aggregation hooks
+  `collect_edges`/`sink_config` let directives own their behavior (core defaults:
+  duckdb/parquet/rerun); `after_compile` may raise to reject a compile;
+  `before_run`/`after_run` are contained notifications.
   `qsql explain` prints the effective chain/hook order. `config.build_models`
   composes all plugin Configs into GlobalConfig/CellConfig via `create_model`.
 - **Config resolution:** global → cell → run overrides (`--set k.v=x`, `QSQL_K__V=x`),

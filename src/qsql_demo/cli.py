@@ -181,7 +181,11 @@ def explain(
         return " → ".join(f"{p.name}({p.priority})" for p in plugs) or "(none)"
 
     typer.echo(f"run chain:      {names(PLUGINS.chain())} → [execute on engine, land via sink]")
-    for hook in ("render_context", "after_render", "after_compile", "before_run", "after_run"):
+    for hook in (
+        "render_context", "after_render", "resolve_engine", "resolve_sink",
+        "collect_edges", "sink_config", "should_rerun",
+        "after_compile", "before_run", "after_run",
+    ):
         typer.echo(f"{hook + ':':<16}{names(PLUGINS.overriding(hook))}")
     typer.echo("cells:")
     for name in project.order:

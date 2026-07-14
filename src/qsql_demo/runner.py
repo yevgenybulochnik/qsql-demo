@@ -111,8 +111,10 @@ def base_runner(project: Project) -> Inner:
     def run_cell(cell: RenderedCell, ctx: RunContext) -> RunResult:
         started = time.perf_counter()
         try:
+            # cell-declared extensions load via the Extensions plugin's
+            # before_execute; sinks are core mechanism, so theirs load here
             sink = make_sink(cell.config, ctx.root)
-            for ext in (*cell.extensions, *sink.requires):
+            for ext in sink.requires:
                 _load_ext_cached(ctx, ext)
             for upstream in cell.depends_on:
                 up_sink = make_sink(project.cells[upstream].config, ctx.root)

@@ -31,11 +31,19 @@ def touches(changes: set[tuple[Any, str]], path: Path) -> bool:
     return any(str(Path(changed).resolve()) == target for _, changed in changes)
 
 
+def should_rerun(cell: Any) -> bool:
+    """First-result decision (the Autorun plugin answers); default: rerun."""
+    from .registry import PLUGINS
+
+    answer = PLUGINS.first_result("should_rerun", cell)
+    return True if answer is None else bool(answer)
+
+
 def plan_rerun(old_hashes: dict[str, str], project: Project) -> list[str]:
-    """Changed cells (new ones count) plus downstream, autorun:false filtered out."""
+    """Changed cells (new ones count) plus downstream, rerun-filter applied."""
     changed = {n for n, c in project.cells.items() if old_hashes.get(n) != c.hash}
     targets = downstream(list(project.cells), project.edges, changed)
-    return [n for n in targets if project.cells[n].config.autorun]
+    return [n for n in targets if should_rerun(project.cells[n])]
 
 
 def run_changed(
@@ -70,7 +78,7 @@ def watch_events(
     session = RunSession()  # one conduit for the whole watch, not per rerun
     try:
         project = compile_file(path, overrides)
-        autorun = [n for n in project.order if project.cells[n].config.autorun]
+        autorun = [n for n in project.order if should_rerun(project.cells[n])]
         results = (
             run_project(project, select=autorun, closure=False, session=session)
             if autorun
