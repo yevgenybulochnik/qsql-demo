@@ -250,16 +250,29 @@ class QsqlApp(App):
 
     PREVIEW_ROWS = 100
 
+    def _read_parquet_head(self, target: str) -> pl.DataFrame:
+        """Preview through duckdb's parquet reader, never polars' — the polars
+        reader panics on duckdb-written INTERVAL columns, and duckdb only reads
+        the head row groups for a LIMIT."""
+        import duckdb
+
+        from .runner import _preview
+
+        con = duckdb.connect()
+        try:
+            return _preview(con, f"read_parquet('{target}')", self.PREVIEW_ROWS)
+        finally:
+            con.close()
+
     def _preview_frame(self, name: str) -> pl.DataFrame:
         result = self.results.get(name)
         if result is not None and isinstance(result.preview, pl.DataFrame):
             return result.preview
-        # lazy head, never a full read: landed files can be huge
         if result is not None and result.ok and result.target and result.target.endswith(".parquet"):
-            return pl.scan_parquet(result.target).head(self.PREVIEW_ROWS).collect()
+            return self._read_parquet_head(result.target)
         target = self.project.root / "data" / f"{name}.parquet" if self.project else None
         if target and target.exists():
-            return pl.scan_parquet(target).head(self.PREVIEW_ROWS).collect()
+            return self._read_parquet_head(str(target))
         return pl.DataFrame({"info": [f"no output for {name!r} yet — press r to run"]})
 
     # ---------- actions (footer bindings) ----------
