@@ -9,7 +9,60 @@ from qsql_demo.tui import QsqlApp
 
 @pytest.fixture
 def notebook(tmp_path):
-    return write_scaffold(tmp_path / "base.sql")
+    return write_scaffold(tmp_path / "base.qsql")
+
+
+async def test_missing_file_shows_picker_and_template_creates(tmp_path) -> None:
+    from qsql_demo.tui import NotebookPicker
+
+    target = tmp_path / "base.qsql"
+    app = QsqlApp(path=target, watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, NotebookPicker)
+        await pilot.press("enter")  # sole option: create base.qsql from the template
+        await pilot.pause()
+        assert target.exists()
+        assert app.project and "users" in app.project.cells
+        assert app.results == {}  # picker never runs anything
+
+
+async def test_missing_file_picker_lists_existing_notebooks(tmp_path) -> None:
+    from qsql_demo.tui import NotebookPicker
+
+    write_scaffold(tmp_path / "other.qsql")
+    app = QsqlApp(path=tmp_path / "base.qsql", watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, NotebookPicker)
+        await pilot.press("enter")  # first option: open other.qsql
+        await pilot.pause()
+        assert app.path.name == "other.qsql"
+        assert app.project
+        assert not (tmp_path / "base.qsql").exists()  # nothing was scaffolded
+
+
+async def test_o_switches_between_notebooks_and_resets_state(tmp_path) -> None:
+    from qsql_demo.tui import NotebookPicker
+
+    alpha = write_scaffold(tmp_path / "alpha.qsql")
+    beta = tmp_path / "beta.qsql"
+    beta.write_text("-- @cell solo\nSELECT 1 AS x;\n")
+    app = QsqlApp(path=alpha, watch=False)
+    async with app.run_test() as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.results and app.armed
+        await pilot.press("o")
+        await pilot.pause()
+        assert isinstance(app.screen, NotebookPicker)
+        await pilot.press("down", "enter")  # alpha, [beta], create base.qsql
+        await pilot.pause()
+        assert app.path == beta
+        assert list(app.project.cells) == ["solo"]
+        assert app.results == {}      # fresh notebook, fresh state
+        assert app.armed is False     # arming is per-notebook
 
 
 async def test_boots_lists_cells_and_navigates(notebook) -> None:

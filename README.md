@@ -28,7 +28,7 @@ GROUP BY 1;
 
 ```console
 $ uv sync
-$ uv run qsql            # scaffolds base.sql
+$ uv run qsql            # scaffolds base.qsql
 $ uv run qsql run        # runs every cell, lands data/<cell>.parquet
 $ uv run qsql list       # cells, topo order, engine -> sink, autorun
 $ uv run qsql show report        # rendered SQL for one cell

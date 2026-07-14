@@ -8,7 +8,7 @@ runner = CliRunner()
 
 
 def _init(tmp_path) -> Path:
-    f = tmp_path / "base.sql"
+    f = tmp_path / "base.qsql"
     result = runner.invoke(app, ["init", str(f)])
     assert result.exit_code == 0, result.output
     return f
@@ -22,11 +22,11 @@ def test_init_scaffolds_and_refuses_overwrite(tmp_path) -> None:
     assert "refus" in again.output.lower()
 
 
-def test_bare_invocation_scaffolds(tmp_path, monkeypatch) -> None:
+def test_bare_invocation_scaffolds_qsql_file(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, [])
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "base.sql").exists()
+    assert (tmp_path / "base.qsql").exists()
 
 
 def test_run_lands_outputs(tmp_path) -> None:

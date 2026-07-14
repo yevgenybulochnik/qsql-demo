@@ -45,11 +45,15 @@ JOIN {{ ref('events') }} e USING (user_id)
 """
 
 
-def write_scaffold(path: Path | str) -> Path:
-    """Write the starter file; refuses to overwrite an existing one."""
+# starting templates offered by init and the TUI's notebook picker
+TEMPLATES: dict[str, str] = {"base": BASE_SQL}
+
+
+def write_scaffold(path: Path | str, template: str = "base") -> Path:
+    """Write a starting template; refuses to overwrite an existing file."""
     path = Path(path)
     if path.exists():
         raise FileExistsError(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(BASE_SQL)
+    path.write_text(TEMPLATES[template])
     return path

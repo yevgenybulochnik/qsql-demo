@@ -25,7 +25,7 @@ app = typer.Typer(
     help="qsql — a notebook for SQL: one file, named cells, comment directives.",
 )
 
-FILE_ARG = typer.Argument(Path("base.sql"), help="The .qsql/.sql notebook file")
+FILE_ARG = typer.Argument(Path("base.qsql"), help="The .qsql/.sql notebook file")
 SET_OPT = typer.Option(None, "--set", help="Override config: key.path=value (repeatable)")
 PLUGINS_OPT = typer.Option(
     None, "--plugins", help="Extra plugin module (dotted name or path/to/file.py, repeatable)"
@@ -35,7 +35,7 @@ PLUGINS_OPT = typer.Option(
 @app.callback()
 def main(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        _init(Path("base.sql"))
+        _init(Path("base.qsql"))
 
 
 @app.command()
@@ -222,7 +222,15 @@ def tui(
     plugins: Optional[list[str]] = PLUGINS_OPT,
 ) -> None:
     """Open the interactive TUI (VisiData-style keys, reflect-only)."""
-    _project(file, set_, plugins)  # load plugins + fail fast on compile errors
+    if file.exists():
+        _project(file, set_, plugins)  # load plugins + fail fast on compile errors
+    else:  # the TUI opens its notebook picker; plugins still need loading
+        load_builtins()
+        rc = file.parent / "qsqlrc.py"
+        if rc.exists():
+            _load_plugin_module(str(rc))
+        for spec in plugins or []:
+            _load_plugin_module(spec)
     from .tui import QsqlApp
 
     QsqlApp(path=file, overrides=gather_overrides(list(set_ or []))).run()

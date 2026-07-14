@@ -10,6 +10,7 @@ Keys: j/k cell rows . h/l cycle detail tabs . gg/G top/bottom . Enter dive into
 the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
 - hide col . s/gs select . F frequency . I describe . / search, n/N next/prev .
 t raw/rendered . a/A cell/global autorun . r/R run cell/all . V real VisiData .
+o open/switch notebook (auto-opens as a picker when the file doesn't exist) .
 q pop/quit
 """
 
@@ -27,7 +28,9 @@ from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static, TabbedContent, TabPane
+from textual.screen import ModalScreen
+from textual.widgets import DataTable, Footer, Header, Input, OptionList, RichLog, Static, TabbedContent, TabPane
+from textual.widgets.option_list import Option
 
 from .compiler import Project, compile_file
 from .errors import QsqlError
@@ -35,6 +38,51 @@ from .models import RunResult
 from .runner import RunSession, run_project
 from .sheet import Sheet
 from .watcher import hashes_of, plan_rerun
+
+
+class NotebookPicker(ModalScreen):
+    """Choose a notebook in the directory, or create one from a starting template."""
+
+    BINDINGS = [Binding("escape", "cancel", "cancel")]
+
+    CSS = """
+    NotebookPicker { align: center middle; }
+    #picker { width: 64; max-height: 20; border: solid $primary; padding: 1; }
+    """
+
+    def __init__(self, directory: Path, create_name: str | None) -> None:
+        super().__init__()
+        self.directory = directory
+        self.create_name = create_name
+
+    def compose(self) -> ComposeResult:
+        options = [
+            Option(f"open    {f.name}", id=f"open:{f}")
+            for f in sorted(self.directory.glob("*.qsql")) + sorted(self.directory.glob("*.sql"))
+        ]
+        if self.create_name:
+            options.append(
+                Option(f"create  {self.create_name} — starter template", id=f"template:{self.create_name}")
+            )
+        with Vertical(id="picker"):
+            yield Static("select a notebook — Enter opens, Esc cancels")
+            yield OptionList(*options)
+
+    def on_mount(self) -> None:
+        self.query_one(OptionList).focus()
+
+    def on_key(self, event: events.Key) -> None:
+        if event.character == "j":
+            self.query_one(OptionList).action_cursor_down()
+        elif event.character == "k":
+            self.query_one(OptionList).action_cursor_up()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        kind, _, value = (event.option.id or "").partition(":")
+        self.dismiss((kind, value))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class QsqlApp(App):
@@ -57,6 +105,7 @@ class QsqlApp(App):
         Binding("F", "frequency", "freq"),
         Binding("I", "describe", "describe"),
         Binding("V", "visidata", "vd"),
+        Binding("o", "open_notebook", "open"),
         Binding("slash", "search", "search", key_display="/"),
         Binding("ctrl+d", "page(1)", "page down", show=False),
         Binding("ctrl+u", "page(-1)", "page up", show=False),
@@ -115,6 +164,22 @@ class QsqlApp(App):
         table.add_columns("cell", "engine → sink", "auto", "status", "rows", "ms")
         self.query_one("#data", DataTable).can_focus = False
         table.focus()
+        if self.path.exists():
+            self._load_notebook(self.path)
+        else:
+            self._show_picker(startup=True)
+
+    def _load_notebook(self, path: Path | str) -> None:
+        """Open a notebook (fresh state), arming and watching per-notebook."""
+        self.path = Path(path)
+        self.title = f"qsql · {self.path.name}"
+        self.results = {}
+        self.running = set()
+        self.sheet_stack = []
+        self._data_shown = None
+        self.mode = "cells"
+        self.armed = False
+        self.project = None
         try:
             self.project = compile_file(self.path, self.overrides)
         except QsqlError as exc:
@@ -128,7 +193,34 @@ class QsqlApp(App):
         else:
             self.log_line("autorun paused — press R to run all cells and arm watch reruns")
         if self.watch:
-            self._watch_worker()
+            self._watch_worker()  # exclusive group: replaces any previous watcher
+
+    def _show_picker(self, startup: bool) -> None:
+        directory = self.path.parent if str(self.path.parent) else Path(".")
+        if not self.path.exists():
+            create_name = self.path.name
+        elif not (directory / "base.qsql").exists():
+            create_name = "base.qsql"
+        else:
+            create_name = None
+
+        def chosen(result: tuple[str, str] | None) -> None:
+            if result is None:
+                if startup:
+                    self.exit()
+                return
+            kind, value = result
+            if kind == "template":
+                from .scaffold import write_scaffold
+
+                self._load_notebook(write_scaffold(directory / value))
+            else:
+                self._load_notebook(Path(value))
+
+        self.push_screen(NotebookPicker(directory, create_name), chosen)
+
+    def action_open_notebook(self) -> None:
+        self._show_picker(startup=False)
 
     def on_unmount(self) -> None:
         self.session.close()
@@ -353,6 +445,8 @@ class QsqlApp(App):
     # ---------- raw keys (vim/VisiData movement + sheet ops) ----------
 
     def on_key(self, event: events.Key) -> None:
+        if len(self.screen_stack) > 1:  # a modal (the picker) owns the keys
+            return
         if self.query_one("#search", Input).has_focus:
             if event.key == "escape":
                 self._hide_search()
