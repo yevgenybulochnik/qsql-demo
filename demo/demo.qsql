@@ -1,0 +1,42 @@
+-- qsql demo — one file of valid SQL, split into cells, across two engines.
+-- Postgres cells run next to the data; the DuckDB cell joins their results.
+-- Seed the tables with: demo/seed.sql (see demo/README.md)
+
+/*@
+input: { postgres: { dsn: "postgresql://qsql:qsql@localhost:5432/qsql" } }
+output: { type: parquet, dir: data/ }
+*/
+
+-- @cell shipped_by_tier
+-- Runs IN postgres: the aggregation happens next to the 5k orders.
+SELECT c.tier,
+       count(*)                  AS orders,
+       round(sum(o.amount), 2)   AS revenue
+FROM orders o
+JOIN customers c USING (customer_id)
+WHERE o.status = 'shipped'
+GROUP BY c.tier;
+
+-- @cell top_customers
+-- Same engine, same DSN -> same context.
+SELECT c.name,
+       c.region,
+       c.tier,
+       count(*)                  AS orders,
+       round(sum(o.amount), 2)   AS spend
+FROM orders o
+JOIN customers c USING (customer_id)
+WHERE o.status <> 'refunded'
+GROUP BY c.name, c.region, c.tier
+ORDER BY spend DESC
+LIMIT 8;
+
+-- @cell tier_share
+-- Cross-engine: a DuckDB cell reading both Postgres cells' results.
+-- @engine: duckdb
+SELECT t.tier,
+       t.orders,
+       t.revenue,
+       round(100 * t.revenue / sum(t.revenue) OVER (), 1) AS pct_of_revenue
+FROM {{ ref('shipped_by_tier') }} t
+ORDER BY t.revenue DESC;
