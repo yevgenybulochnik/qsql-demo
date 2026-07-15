@@ -20,10 +20,15 @@ services:
       - qsql-pg:/var/lib/postgresql/data
       - ./docker/pg-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U qsql -d qsql"]
+      # -h 127.0.0.1 is load-bearing: on a fresh volume the entrypoint runs the
+      # init scripts against a temporary socket-only server, so a plain
+      # pg_isready reports ready before the real (TCP) server is listening and
+      # `up -d --wait` returns too early.
+      test: ["CMD-SHELL", "pg_isready -U qsql -d qsql -h 127.0.0.1"]
       interval: 2s
       timeout: 3s
-      retries: 15
+      retries: 30
+      start_period: 30s
 
 volumes:
   qsql-pg:
