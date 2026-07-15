@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from qsql_demo import registry
@@ -12,6 +14,23 @@ def fresh_registries():
     yield
     for reg, snap in snaps:
         reg.restore(snap)
+
+
+@pytest.fixture
+def pg_dsn():
+    """DSN of the compose Postgres's test database (docker compose up -d --wait);
+    postgres-marked tests skip when psycopg or the server is unavailable."""
+    dsn = os.environ.get(
+        "QSQL_TEST_PG_DSN", "postgresql://qsql:qsql@localhost:5432/qsql_test"
+    )
+    psycopg = pytest.importorskip(
+        "psycopg", reason="postgres tests need the 'postgres' extra"
+    )
+    try:
+        psycopg.connect(dsn, connect_timeout=2).close()
+    except psycopg.OperationalError as exc:
+        pytest.skip(f"no postgres server at {dsn}: {exc}")
+    return dsn
 
 
 @pytest.fixture
