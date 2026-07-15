@@ -8,6 +8,7 @@ import duckdb
 import pytest
 
 from qsql_demo.compiler import compile_text
+from qsql_demo.errors import ExecutorError
 from qsql_demo.models import RunContext
 from qsql_demo.registry import EXECUTORS
 
@@ -50,6 +51,24 @@ def test_executor_runs_real_sql(seeded, tmp_path) -> None:
         conn.close()
 
 
+def test_real_driver_errors_wrap_as_executor_error(seeded, tmp_path) -> None:
+    """The offline test fakes the driver; only a real psycopg error proves the wrap."""
+    from qsql_demo.config import resolve_cell
+    from qsql_demo.models import RenderedCell
+
+    cfg = resolve_cell({}, {"input": {"postgres": {"dsn": seeded}}})
+    cell = RenderedCell(
+        name="pg", config=cfg, sql_raw="", hash="", sql="SELECT * FROM no_such_table",
+        engine="postgres", sink_type="parquet",
+    )
+    conn = duckdb.connect()
+    try:
+        with pytest.raises(ExecutorError, match="postgres.*no_such_table"):
+            EXECUTORS.get("postgres").execute(cell, RunContext(conn=conn, root=tmp_path))
+    finally:
+        conn.close()
+
+
 def test_same_context_cells_share_session_temps(seeded, tmp_path) -> None:
     project = compile_text(
         _cell_config(seeded)
@@ -67,6 +86,30 @@ def test_same_context_cells_share_session_temps(seeded, tmp_path) -> None:
         ).fetchall() == [(3, 6)]
     finally:
         con.close()
+
+
+def test_failed_cell_does_not_poison_the_session(seeded, tmp_path) -> None:
+    """watch/TUI keep one session across reruns: without autocommit a failed
+    statement would leave it aborted and every later cell would fail too."""
+    from qsql_demo.runner import RunSession, run_project
+
+    session = RunSession()
+    try:
+        broken = compile_text(
+            _cell_config(seeded) + "-- @cell broken\nSELECT * FROM no_such_table;",
+            root=tmp_path,
+        )
+        assert not {r.cell: r for r in run_project(broken, session=session)}["broken"].ok
+
+        # same session, same connection: a healthy cell must still run
+        healthy = compile_text(
+            _cell_config(seeded) + "-- @cell healthy\nSELECT count(*) AS c FROM nums;",
+            root=tmp_path,
+        )
+        result = {r.cell: r for r in run_project(healthy, session=session)}["healthy"]
+        assert result.ok, result.error
+    finally:
+        session.close()
 
 
 def test_cross_engine_duckdb_reads_postgres_cell(seeded, tmp_path) -> None:
