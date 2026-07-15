@@ -2,7 +2,7 @@
 
 A single `.sql` file is the notebook: valid SQL split into named **cells** by comment
 directives. Config is YAML inside `@`-comments; SQL bodies are Jinja-templated. Cells
-form a dependency DAG, run on pluggable **engines** (DuckDB, SQLite, BigQuery), and land
+form a dependency DAG, run on pluggable **engines** (DuckDB, SQLite, Postgres, BigQuery), and land
 through pluggable **sinks** (parquet files, DuckDB tables, Postgres tables) that also
 define how downstream cells read them back.
 
@@ -51,9 +51,11 @@ $ uv run qsql run --set output.type=duckdb --set vars.active_only=false
   top of global → cell config.
 
 Optional extras: `uv sync --extra bigquery` (BigQuery engine),
-`--extra visidata` (the TUI's `V` deep-dive). The Postgres sink needs no Python
-driver — DuckDB's `postgres` extension handles it (`output: { type: postgres,
-dsn: "$PG_DSN", table: analytics.report }`).
+`--extra postgres` (Postgres engine, via psycopg), `--extra visidata` (the TUI's `V`
+deep-dive). The Postgres *sink* needs no Python driver — DuckDB's `postgres` extension
+handles it (`output: { type: postgres, dsn: "$PG_DSN", table: analytics.report }`);
+the Postgres *engine* runs cells next to the data (`input: { postgres: { dsn: "$PG_DSN" } }`),
+with same-DSN cells sharing a session so `ref()` stays in-engine.
 
 ## Development
 
@@ -61,4 +63,6 @@ Built test-first (red-green-refactor) with pytest; commits follow Conventional C
 
 ```console
 $ uv run pytest          # network/bigquery/postgres-gated tests are skipped by default
+$ docker compose up -d --wait               # local Postgres (qsql + qsql_test databases)
+$ uv run --extra postgres pytest -m postgres  # skips politely if the server is down
 ```

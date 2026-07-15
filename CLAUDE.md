@@ -45,6 +45,10 @@ first `@cell`) inherited by every cell.
 ## Commands
 
 - `uv run pytest` — markers `network` / `bigquery` / `postgres` are deselected by default.
+  `docker compose up -d --wait` stands up Postgres (databases: `qsql` for stress/manual
+  data, `qsql_test` for pytest), then `uv run --extra postgres pytest -m postgres` runs
+  the integration tests; they skip when the server is down. Override the DSN with
+  `QSQL_TEST_PG_DSN`.
 - `uv run qsql` (bare = init) | `init` | `run` | `watch` | `tui` | `list` | `show <cell>` |
   `compile` — default file `base.qsql`; `--set key.path=value` repeatable. `qsql tui`
   with a missing file opens a notebook picker: existing .qsql/.qsql.sql files plus
@@ -65,7 +69,8 @@ first `@cell`) inherited by every cell.
 - `compiler.py` — parse → config → render → graph ⇒ `Project`
 - `runner.py` — topo run; per-cell executor+sink; plugin run-chain; RunSession holds
   the conduit connection + extension cache across watch/TUI reruns
-- `executors/`, `sinks/` — strategy leaves (duckdb/sqlite/bigquery; parquet/duckdb/postgres)
+- `executors/`, `sinks/` — strategy leaves (duckdb/sqlite/postgres/bigquery;
+  parquet/duckdb/postgres)
 - `scaffold.py`, `cli.py`, `watcher.py`, `sheet.py` + `tui.py` — CLI, watch loop, TUI
 
 ## Development methodology — red-green-refactor
