@@ -63,6 +63,10 @@ Built test-first (red-green-refactor) with pytest; commits follow Conventional C
 
 ```console
 $ uv run pytest          # network/bigquery/postgres-gated tests are skipped by default
-$ docker compose up -d --wait               # local Postgres (qsql + qsql_test databases)
-$ uv run --extra postgres pytest -m postgres  # skips politely if the server is down
+$ docker compose up -d --wait                 # local Postgres (qsql + qsql_test databases)
+$ uv run --extra postgres pytest -m postgres  # postgres tests only
+$ uv run --extra postgres pytest -m "not (network or bigquery)"   # everything but the cloud
 ```
+
+An explicit `-m` overrides the default deselection in `pyproject.toml`. Postgres tests
+skip (never fail) when the server is down, so the last line is safe without Docker.
