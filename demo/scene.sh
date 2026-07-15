@@ -15,20 +15,24 @@ ACTIVATE="source ../.venv/bin/activate"
 # committed version — otherwise a second run records an already-edited file.
 git checkout -- demo.qsql 2>/dev/null || true
 
-# visidata warns "unsupported locale setting" without this
-export LC_ALL=C.UTF-8 LANG=C.UTF-8
+# Many boxes advertise LANG=en_US.UTF-8 without having generated it, and
+# python's setlocale then raises -> visidata prints "unsupported locale
+# setting". Passed with -e because an already-running tmux server keeps its
+# own environment and would ignore a plain export.
+LOCALE=(-e LC_ALL=C.UTF-8 -e LANG=C.UTF-8)
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
 # match the enclosing terminal so VHS's canvas maps 1:1
-tmux new-session -d -s "$SESSION" -x "$(tput cols)" -y "$(tput lines)" -c "$PWD"
+tmux new-session -d -s "$SESSION" -x "$(tput cols)" -y "$(tput lines)" \
+  -c "$PWD" "${LOCALE[@]}"
 tmux set-option -t "$SESSION" status off
 
 # left: the notebook in nvim
 tmux send-keys -t "$SESSION" "$ACTIVATE && clear && nvim demo.qsql" Enter
 
 # right: the TUI watching it (ends active, so the tape's first keys reach it)
-tmux split-window -h -t "$SESSION" -c "$PWD"
+tmux split-window -h -t "$SESSION" -c "$PWD" "${LOCALE[@]}"
 tmux send-keys -t "$SESSION" "$ACTIVATE && clear && qsql tui demo.qsql" Enter
 
 tmux attach -t "$SESSION"

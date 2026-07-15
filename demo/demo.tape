@@ -58,7 +58,8 @@ Type "o"
 Sleep 7s
 
 # --- beat 4: VisiData on the landed parquet ---------------------------------
+# The TUI suspends itself while vd runs, so the pane blanks for a beat.
 Type "V"
-Sleep 6s
+Sleep 7s
 Type "q"
-Sleep 2s
+Sleep 2500ms
