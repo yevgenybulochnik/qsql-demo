@@ -1,0 +1,29 @@
+# Local Postgres for qsql: integration tests, stress data, manual poking.
+#
+#   docker compose up -d --wait
+#
+# Two databases on one server (created on first boot of an empty volume):
+#   qsql       — long-lived data: stress seeds, manual TUI sessions
+#   qsql_test  — pytest's sandbox (tests create/drop their own tables)
+# The named volume keeps seeded data across `docker compose down` and reboots.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: qsql
+      POSTGRES_PASSWORD: qsql
+      POSTGRES_DB: qsql
+    volumes:
+      - qsql-pg:/var/lib/postgresql/data
+      - ./docker/pg-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qsql -d qsql"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  qsql-pg:
