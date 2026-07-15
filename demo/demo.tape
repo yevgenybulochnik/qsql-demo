@@ -26,7 +26,7 @@ Type "clear" Enter
 Show
 
 # --- the layout: nvim | qsql tui --------------------------------------------
-Type "./scene.sh" Sleep 700ms Enter
+Type "./scene.sh demo.qsql" Sleep 700ms Enter
 Sleep 8s
 
 # --- beat 1: run every cell (focus starts on the TUI pane) -------------------
