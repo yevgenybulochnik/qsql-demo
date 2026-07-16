@@ -65,3 +65,43 @@ def test_search_wraps_and_moves_cursor() -> None:
     assert wrapped.cursor[0] == 1
     missing = sheet.search("zelda")
     assert missing.cursor == sheet.cursor
+
+
+def test_drill_payload_survives_ops_but_not_derived_sheets() -> None:
+    marker = object()
+    sheet = Sheet(FRAME, drill=marker)
+    assert sheet.move(1, 1).drill is marker
+    assert sheet.sort().drill is marker
+    assert sheet.move(0, 1).hide_current().drill is marker
+    assert sheet.toggle_select().drill is marker
+    assert sheet.search("bob").drill is marker
+    # derived sheets are new data, not the drillable listing
+    assert sheet.freq().drill is None
+    assert sheet.describe().drill is None
+
+
+def test_filtered_matches_regex_across_visible_columns() -> None:
+    sheet = Sheet(FRAME)
+    hit = sheet.filtered("^b.b$")
+    assert hit.frame["name"].to_list() == ["bob", "bob"]
+    assert hit.title == "filter(^b.b$)"
+    # case-insensitive, and non-string columns match on their repr
+    assert sheet.filtered("ADA").frame.height == 1
+    assert sheet.filtered("true").frame.height == 3
+    # a hidden column no longer matches
+    assert sheet.move(0, 1).hide_current().filtered("^3$").frame.height == 0
+    assert sheet.filtered("^3$").frame.height == 1
+
+
+def test_filtered_keeps_drill_and_resets_cursor() -> None:
+    marker = object()
+    sheet = Sheet(FRAME, drill=marker).move(3, 1)
+    hit = sheet.filtered("bob")
+    assert hit.drill is marker  # a filtered listing still drills
+    assert hit.cursor == (0, 1)  # row cursor back on top, column kept
+
+
+def test_filtered_invalid_or_empty_pattern_returns_self() -> None:
+    sheet = Sheet(FRAME)
+    assert sheet.filtered("[unclosed") is sheet
+    assert sheet.filtered("") is sheet
