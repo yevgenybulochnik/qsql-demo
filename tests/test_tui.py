@@ -340,6 +340,21 @@ async def test_catalog_browser_opens_drills_and_pops(notebook) -> None:
         assert app.mode == "cells"
 
 
+async def test_catalog_load_error_clears_loading_subtitle(notebook) -> None:
+    # drilling into an output that never ran fails (no parquet yet); the
+    # "loading …" subtitle must not stick around after the error toast
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("j", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 1  # nothing was pushed
+        assert not app.sub_title.startswith("loading")
+
+
 async def test_enter_on_plain_data_sheet_still_resets_preview(notebook) -> None:
     # regression guard for the drill interception: sheets without a drill
     # payload keep the old Enter behavior (reset to the cell's preview)

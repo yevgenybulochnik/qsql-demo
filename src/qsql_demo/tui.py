@@ -448,6 +448,12 @@ class QsqlApp(App):
 
         return duckdb.connect()
 
+    def _restore_subtitle(self) -> None:
+        if self.mode == "data" and self.sheet_stack:
+            self._refresh_data()
+        else:
+            self._refresh_detail()
+
     def _drill_current(self) -> None:
         sheet = self.sheet_stack[-1]
         node: CatalogNode = sheet.drill
@@ -689,6 +695,7 @@ class QsqlApp(App):
         except Exception as exc:
             self.call_from_thread(self.log_line, f"catalog {node.title}: {exc}")
             self.call_from_thread(self.notify, f"catalog: {exc}", severity="error")
+            self.call_from_thread(self._restore_subtitle)  # drop the loading… note
             return
         self.call_from_thread(self._push_sheet, Sheet(frame, title=node.title, drill=node))
 
