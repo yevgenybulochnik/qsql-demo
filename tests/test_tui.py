@@ -327,7 +327,7 @@ async def test_catalog_browser_opens_drills_and_pops(notebook) -> None:
         await pilot.pause()
         assert len(app.sheet_stack) == 2
         leaf = app.sheet_stack[-1]
-        assert leaf.frame.columns == ["column", "field_path", "type", "mode"]
+        assert leaf.frame.columns == ["column", "field_path", "type", "mode", "description"]
         assert leaf.frame.height > 0
         await pilot.press("enter")  # leaves don't drill further
         await app.workers.wait_for_complete()
@@ -358,7 +358,7 @@ async def test_catalog_cache_serves_redrills_and_ctrl_r_refetches(notebook) -> N
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert len(app.sheet_stack) == 2
-        assert app.sheet_stack[-1].frame.columns == ["column", "field_path", "type", "mode"]
+        assert app.sheet_stack[-1].frame.columns == ["column", "field_path", "type", "mode", "description"]
         await pilot.press("ctrl+r")  # invalidate + refetch: the reload now fails
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -496,7 +496,7 @@ async def test_y_yanks_current_cell_or_selected_column_values(notebook, monkeypa
         await app.workers.wait_for_complete()
         await pilot.pause()
         sheet = app.sheet_stack[-1]
-        assert sheet.frame.columns == ["column", "field_path", "type", "mode"]
+        assert sheet.frame.columns == ["column", "field_path", "type", "mode", "description"]
         await pilot.press("l")  # cursor onto field_path
         await pilot.press("y")  # no selection: the current cell
         assert copied == [sheet.frame["field_path"][0]]

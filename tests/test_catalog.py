@@ -23,23 +23,25 @@ from qsql_demo.executors.bigquery_exec import BigQueryExecutor
 from qsql_demo.executors.postgres_exec import PostgresExecutor
 from qsql_demo.sinks import make_sink
 
-FIELD_PATH_COLUMNS = ["column", "field_path", "type", "mode"]
+FIELD_PATH_COLUMNS = ["column", "field_path", "type", "mode", "description"]
 
 
-def _sf(name, field_type, mode="NULLABLE", fields=()):
-    """Stands in for a bigquery SchemaField: name/field_type/mode/fields."""
-    return SimpleNamespace(name=name, field_type=field_type, mode=mode, fields=list(fields))
+def _sf(name, field_type, mode="NULLABLE", fields=(), description=None):
+    """Stands in for a bigquery SchemaField: name/field_type/mode/fields/description."""
+    return SimpleNamespace(
+        name=name, field_type=field_type, mode=mode, fields=list(fields), description=description
+    )
 
 
 def test_bq_field_paths_one_row_per_path_level() -> None:
     schema = [
-        _sf("id", "INTEGER", "REQUIRED"),
+        _sf("id", "INTEGER", "REQUIRED", description="surrogate key"),
         _sf(
             "event",
             "RECORD",
             "NULLABLE",
             [
-                _sf("name", "STRING"),
+                _sf("name", "STRING", description="event name"),
                 _sf(
                     "params",
                     "RECORD",
@@ -51,14 +53,15 @@ def test_bq_field_paths_one_row_per_path_level() -> None:
     ]
     frame = bq_field_paths(schema)
     assert frame.columns == FIELD_PATH_COLUMNS
-    # depth-first, document order, intermediate RECORDs included
+    # depth-first, document order, intermediate RECORDs included; descriptions
+    # ride along like information_schema.column_field_paths
     assert frame.rows() == [
-        ("id", "id", "INTEGER", "REQUIRED"),
-        ("event", "event", "RECORD", "NULLABLE"),
-        ("event", "event.name", "STRING", "NULLABLE"),
-        ("event", "event.params", "RECORD", "REPEATED"),
-        ("event", "event.params.key", "STRING", "NULLABLE"),
-        ("event", "event.params.value", "INTEGER", "NULLABLE"),
+        ("id", "id", "INTEGER", "REQUIRED", "surrogate key"),
+        ("event", "event", "RECORD", "NULLABLE", ""),
+        ("event", "event.name", "STRING", "NULLABLE", "event name"),
+        ("event", "event.params", "RECORD", "REPEATED", ""),
+        ("event", "event.params.key", "STRING", "NULLABLE", ""),
+        ("event", "event.params.value", "INTEGER", "NULLABLE", ""),
     ]
 
 
@@ -81,7 +84,8 @@ def test_duckdb_field_paths_flattens_structs_and_lists(con) -> None:
     )
     frame = duckdb_field_paths(rel.columns, rel.types)
     assert frame.columns == FIELD_PATH_COLUMNS
-    paths = {path: (type_, mode) for _, path, type_, mode in frame.rows()}
+    assert frame["description"].to_list() == [""] * frame.height  # no comments here
+    paths = {path: (type_, mode) for _, path, type_, mode, _ in frame.rows()}
     # a LIST wrapper adds no path segment: params -> params.key, not params.child.key
     assert set(paths) == {
         "n",
@@ -106,7 +110,7 @@ def test_duckdb_field_paths_survives_map_and_fixed_arrays(con) -> None:
     # non-type child; .children raises on scalars)
     rel = con.sql("SELECT MAP {'a': 1} AS m, CAST([1, 2, 3] AS INT[3]) AS fixed LIMIT 0")
     frame = duckdb_field_paths(rel.columns, rel.types)
-    paths = {path for _, path, _, _ in frame.rows()}
+    paths = {path for _, path, _, _, _ in frame.rows()}
     assert "m" in paths
     assert "fixed" in paths
 
@@ -156,8 +160,8 @@ def test_sqlite_catalog_chain(tmp_path) -> None:
     cols = leaf.load()
     assert cols.columns == FIELD_PATH_COLUMNS
     assert cols.rows() == [
-        ("n", "n", "INTEGER", "REQUIRED"),
-        ("label", "label", "TEXT", ""),
+        ("n", "n", "INTEGER", "REQUIRED", ""),
+        ("label", "label", "TEXT", "", ""),
     ]
     assert leaf.child is None
 
@@ -204,7 +208,12 @@ def test_bigquery_catalog_chain(monkeypatch) -> None:
             return SimpleNamespace(
                 schema=[
                     _sf("id", "INTEGER", "REQUIRED"),
-                    _sf("event", "RECORD", "REPEATED", [_sf("name", "STRING")]),
+                    _sf(
+                        "event",
+                        "RECORD",
+                        "REPEATED",
+                        [_sf("name", "STRING", description="event name")],
+                    ),
                 ]
             )
 
@@ -222,6 +231,8 @@ def test_bigquery_catalog_chain(monkeypatch) -> None:
     leaf = tables_node.child(tables.row(0, named=True))
     paths = leaf.load()
     assert "event.name" in paths["field_path"].to_list()
+    by_path = {row["field_path"]: row["description"] for row in paths.iter_rows(named=True)}
+    assert by_path["event.name"] == "event name"
     assert leaf.child is None
     assert len(created) == 1  # one client, memoized across the whole drill chain
 
@@ -244,7 +255,10 @@ class FakeCatalogPg:
         if "information_schema.tables" in sql:
             return FakeCatalogPgCursor([("users",)])
         if "information_schema.columns" in sql:
-            return FakeCatalogPgCursor([("id", "integer", "NO"), ("email", "text", "YES")])
+            assert "col_description" in sql  # column comments ride along
+            return FakeCatalogPgCursor(
+                [("id", "integer", "NO", "primary key"), ("email", "text", "YES", None)]
+            )
         raise AssertionError(f"unexpected catalog sql: {sql}")
 
     def close(self):
@@ -269,8 +283,8 @@ def test_postgres_catalog_chain(monkeypatch) -> None:
     leaf = tables_node.child(tables.row(0, named=True))
     cols = leaf.load()
     assert cols.rows() == [
-        ("id", "id", "integer", "REQUIRED"),
-        ("email", "email", "text", ""),
+        ("id", "id", "integer", "REQUIRED", "primary key"),
+        ("email", "email", "text", "", ""),
     ]
     assert leaf.child is None
     # throwaway connection per load, closed every time
