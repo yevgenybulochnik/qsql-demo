@@ -8,11 +8,31 @@ level, intermediate STRUCTs included; a LIST wrapper adds no path segment.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Sequence
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, Sequence
 
+import duckdb
 import polars as pl
 
+if TYPE_CHECKING:
+    from .compiler import Project
+
 FIELD_PATH_SCHEMA = {"column": pl.Utf8, "field_path": pl.Utf8, "type": pl.Utf8, "mode": pl.Utf8}
+
+
+@dataclass(frozen=True)
+class CatalogNode:
+    """One drillable catalog level: a frame to show, and how to go deeper.
+
+    ``load`` blocks (network/disk) — call it off the UI thread. ``child`` maps
+    a named row of the loaded frame to the next level; None marks a leaf.
+    """
+
+    title: str
+    load: Callable[[], pl.DataFrame]
+    child: Optional[Callable[[dict[str, Any]], Optional["CatalogNode"]]] = None
 
 
 def _field_path_frame(rows: list[tuple[str, str, str, str]]) -> pl.DataFrame:
@@ -62,3 +82,271 @@ def duckdb_field_paths(columns: Sequence[str], types: Sequence[Any]) -> pl.DataF
     for name, type_ in zip(columns, types):
         walk(name, type_, name, "")
     return _field_path_frame(rows)
+
+
+# ---------- node builders ----------
+
+
+def _info_node(title: str, message: str) -> CatalogNode:
+    frame = pl.DataFrame({"info": [message]})
+    return CatalogNode(title=title, load=lambda: frame)
+
+
+def sink_output_node(
+    cell_name: str, config: Any, root: Path, connect: Callable[[], Any] | None = None
+) -> CatalogNode:
+    """Leaf: field paths of a cell's landed sink, read back via its ref_expr.
+
+    ``connect`` supplies the DuckDB connection; pass a cursor factory of the
+    live conduit when it may already hold the sink's ATTACH (a throwaway
+    connection cannot re-ATTACH a file another connection holds).
+    """
+
+    def load() -> pl.DataFrame:
+        from .runner import _load_extension
+        from .sinks import make_sink
+
+        sink = make_sink(config, root)
+        con = connect() if connect is not None else duckdb.connect()
+        try:
+            for ext in sink.requires:
+                _load_extension(con, ext)
+            sink.prepare(con)
+            rel = con.sql(f"SELECT * FROM {sink.ref_expr(cell_name)} LIMIT 0")
+            return duckdb_field_paths(rel.columns, rel.types)
+        finally:
+            con.close()
+
+    return CatalogNode(title=f"schema({cell_name})", load=load)
+
+
+def bigquery_context_node(spec: dict[str, Any]) -> CatalogNode:
+    """datasets -> tables -> field paths, on one client memoized per chain."""
+    holder: dict[str, Any] = {}
+
+    def client() -> Any:
+        if "client" not in holder:
+            from .registry import EXECUTORS
+
+            holder["client"] = EXECUTORS.get("bigquery").make_client(spec)
+        return holder["client"]
+
+    title = f"bigquery:{spec.get('project')}"
+
+    def load() -> pl.DataFrame:
+        datasets = [d.dataset_id for d in client().list_datasets()]
+        return pl.DataFrame({"dataset": datasets}, schema={"dataset": pl.Utf8})
+
+    def child(row: dict[str, Any]) -> CatalogNode:
+        ds = row["dataset"]
+
+        def tables_load() -> pl.DataFrame:
+            tables = list(client().list_tables(ds))
+            return pl.DataFrame(
+                {
+                    "table": [t.table_id for t in tables],
+                    "type": [getattr(t, "table_type", None) or "" for t in tables],
+                },
+                schema={"table": pl.Utf8, "type": pl.Utf8},
+            )
+
+        def tables_child(trow: dict[str, Any]) -> CatalogNode:
+            table = trow["table"]
+            return CatalogNode(
+                title=f"{ds}.{table}",
+                load=lambda: bq_field_paths(client().get_table(f"{ds}.{table}").schema),
+            )
+
+        return CatalogNode(title=f"{title}/{ds}", load=tables_load, child=tables_child)
+
+    return CatalogNode(title=title, load=load, child=child)
+
+
+def postgres_context_node(dsn: str) -> CatalogNode:
+    """schemas -> tables -> flat columns, a throwaway connection per load."""
+
+    def query(sql: str, params: tuple | None = None) -> list[tuple]:
+        from .registry import EXECUTORS
+
+        con = EXECUTORS.get("postgres").make_connection(dsn)
+        try:
+            return con.execute(sql, params).fetchall()
+        finally:
+            con.close()
+
+    def load() -> pl.DataFrame:
+        rows = query(
+            "SELECT schema_name FROM information_schema.schemata"
+            " WHERE schema_name NOT IN ('pg_catalog', 'information_schema')"
+            " ORDER BY schema_name"
+        )
+        return pl.DataFrame({"schema": [r[0] for r in rows]}, schema={"schema": pl.Utf8})
+
+    def child(row: dict[str, Any]) -> CatalogNode:
+        schema = row["schema"]
+
+        def tables_load() -> pl.DataFrame:
+            rows = query(
+                "SELECT table_name FROM information_schema.tables"
+                " WHERE table_schema = %s ORDER BY table_name",
+                (schema,),
+            )
+            return pl.DataFrame({"table": [r[0] for r in rows]}, schema={"table": pl.Utf8})
+
+        def tables_child(trow: dict[str, Any]) -> CatalogNode:
+            table = trow["table"]
+
+            def columns_load() -> pl.DataFrame:
+                rows = query(
+                    "SELECT column_name, data_type, is_nullable"
+                    " FROM information_schema.columns"
+                    " WHERE table_schema = %s AND table_name = %s"
+                    " ORDER BY ordinal_position",
+                    (schema, table),
+                )
+                return _field_path_frame(
+                    [(n, n, t, "REQUIRED" if nullable == "NO" else "") for n, t, nullable in rows]
+                )
+
+            return CatalogNode(title=f"{schema}.{table}", load=columns_load)
+
+        return CatalogNode(title=f"postgres/{schema}", load=tables_load, child=tables_child)
+
+    return CatalogNode(title="postgres", load=load, child=child)
+
+
+def _spec_path(spec: Any) -> str | None:
+    return spec.get("path") if isinstance(spec, dict) else spec
+
+
+def sqlite_context_node(spec: Any, root: Path) -> CatalogNode:
+    """tables -> flat columns via PRAGMA table_info."""
+    path = _spec_path(spec)
+    if not path or path == ":memory:":
+        # only the run session's shared connection holds it; don't race that
+        return _info_node("sqlite::memory:", "in-memory sqlite context — not browsable")
+    db = str(root / path)
+
+    def load() -> pl.DataFrame:
+        con = sqlite3.connect(db)
+        try:
+            rows = con.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
+            ).fetchall()
+        finally:
+            con.close()
+        return pl.DataFrame({"table": [r[0] for r in rows]}, schema={"table": pl.Utf8})
+
+    def child(row: dict[str, Any]) -> CatalogNode:
+        table = row["table"]
+
+        def columns_load() -> pl.DataFrame:
+            con = sqlite3.connect(db)
+            try:
+                quoted = table.replace('"', '""')
+                info = con.execute(f'PRAGMA table_info("{quoted}")').fetchall()
+            finally:
+                con.close()
+            return _field_path_frame(
+                [
+                    (name, name, type_ or "", "REQUIRED" if notnull else "")
+                    for _, name, type_, notnull, *_ in info
+                ]
+            )
+
+        return CatalogNode(title=f"sqlite:{path}/{table}", load=columns_load)
+
+    return CatalogNode(title=f"sqlite:{path}", load=load, child=child)
+
+
+def duckdb_context_node(spec: Any, root: Path) -> CatalogNode:
+    """tables -> field paths on a duckdb database file.
+
+    Connecting by path shares the in-process instance with a conduit that
+    targets the same file, so no handle conflict arises here.
+    """
+    path = _spec_path(spec)
+    if not path:
+        return _info_node("duckdb::memory:", "in-memory duckdb context — not browsable")
+    db = str(root / path)
+
+    def load() -> pl.DataFrame:
+        con = duckdb.connect(db)
+        try:
+            rows = con.execute(
+                "SELECT table_schema, table_name FROM information_schema.tables"
+                " ORDER BY table_schema, table_name"
+            ).fetchall()
+        finally:
+            con.close()
+        return pl.DataFrame(
+            {"schema": [r[0] for r in rows], "table": [r[1] for r in rows]},
+            schema={"schema": pl.Utf8, "table": pl.Utf8},
+        )
+
+    def child(row: dict[str, Any]) -> CatalogNode:
+        schema, table = row["schema"], row["table"]
+
+        def fields_load() -> pl.DataFrame:
+            con = duckdb.connect(db)
+            try:
+                rel = con.sql(f'SELECT * FROM "{schema}"."{table}" LIMIT 0')
+                return duckdb_field_paths(rel.columns, rel.types)
+            finally:
+                con.close()
+
+        return CatalogNode(title=f"duckdb:{path}/{schema}.{table}", load=fields_load)
+
+    return CatalogNode(title=f"duckdb:{path}", load=load, child=child)
+
+
+def _postgres_from_config(config: Any) -> CatalogNode | None:
+    from .executors.postgres_exec import _dsn
+
+    dsn = _dsn(config)
+    return postgres_context_node(dsn) if dsn else None
+
+
+_CONTEXT_BUILDERS: dict[str, Callable[[Any, Path], CatalogNode | None]] = {
+    "bigquery": lambda config, root: bigquery_context_node(
+        (config.input or {}).get("bigquery") or {}
+    ),
+    "postgres": lambda config, root: _postgres_from_config(config),
+    "sqlite": lambda config, root: sqlite_context_node((config.input or {}).get("sqlite"), root),
+    "duckdb": lambda config, root: duckdb_context_node((config.input or {}).get("duckdb"), root),
+}
+
+
+def project_root_node(project: Project, connect: Callable[[], Any] | None = None) -> CatalogNode:
+    """Top level: the project's engine contexts (deduped) plus cell outputs."""
+    from .registry import EXECUTORS
+
+    contexts: list[tuple[str, str, Any]] = []  # (context_key, engine, config)
+    seen: set[str] = set()
+    for name in project.order:
+        cell = project.cells[name]
+        key = EXECUTORS.get(cell.engine).context_key(cell.config)
+        if key not in seen:
+            seen.add(key)
+            contexts.append((key, cell.engine, cell.config))
+
+    rows = [("context", key, engine, "") for key, engine, _ in contexts]
+    for name in project.order:
+        cell = project.cells[name]
+        rows.append(("output", name, cell.engine, f"{cell.engine} → {cell.sink_type}"))
+    frame = pl.DataFrame(
+        rows,
+        schema={"kind": pl.Utf8, "name": pl.Utf8, "engine": pl.Utf8, "detail": pl.Utf8},
+        orient="row",
+    )
+    by_key = {key: (engine, config) for key, engine, config in contexts}
+
+    def child(row: dict[str, Any]) -> CatalogNode | None:
+        if row["kind"] == "output":
+            cell = project.cells[row["name"]]
+            return sink_output_node(cell.name, cell.config, project.root, connect=connect)
+        engine, config = by_key[row["name"]]
+        builder = _CONTEXT_BUILDERS.get(engine)
+        return builder(config, project.root) if builder else None
+
+    return CatalogNode(title="catalog", load=lambda: frame, child=child)
