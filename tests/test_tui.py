@@ -379,7 +379,7 @@ async def test_run_and_notebook_switch_clear_the_catalog_cache(notebook) -> None
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert len(app._catalog_cache) > 0
-        await pilot.press("q", "q", "R")  # a run changes outputs/warehouses
+        await pilot.press("q", "R")  # back to cells, rerun: outputs changed
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert len(app._catalog_cache) == 0

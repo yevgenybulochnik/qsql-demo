@@ -12,7 +12,8 @@ the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
 f filter rows by regex (live; Enter commits, Esc cancels) . y yank the cell
 (or selected rows' column, ",\n"-joined) to the clipboard .
 S catalog browser (Enter drills context/dataset/table down to field paths,
-q pops) . t raw/rendered . a/A cell/global autorun . r/R run cell/all .
+q pops; levels are cached — ctrl+r refetches the current one) .
+t raw/rendered . a/A cell/global autorun . r/R run cell/all .
 V real VisiData . o open/switch notebook (auto-opens as a picker when the
 file doesn't exist) . q pop/quit
 """
@@ -35,7 +36,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, OptionList, RichLog, Static, TabbedContent, TabPane
 from textual.widgets.option_list import Option
 
-from .catalog import CatalogNode, project_root_node
+from .catalog import CatalogCache, CatalogNode, project_root_node
 from .compiler import Project, compile_file
 from .errors import QsqlError
 from .models import RunResult
@@ -118,6 +119,7 @@ class QsqlApp(App):
         Binding("V", "visidata", "vd"),
         Binding("o", "open_notebook", "open"),
         Binding("slash", "search", "search", key_display="/"),
+        Binding("ctrl+r", "refetch", "refetch", show=False),
         Binding("ctrl+d", "page(1)", "page down", show=False),
         Binding("ctrl+u", "page(-1)", "page up", show=False),
     ]
@@ -150,6 +152,7 @@ class QsqlApp(App):
         self._last_search = ""
         self._input_mode = "search"  # what the bottom input edits: search | filter
         self._filter_base: Sheet | None = None  # sheet being live-filtered
+        self._catalog_cache = CatalogCache()  # cleared on run/recompile/switch
         # what the #data table currently displays; holding the frame reference
         # keeps identity comparison sound (ids can't be recycled)
         self._data_shown: tuple[Any, tuple[str, ...], frozenset[int]] | None = None
@@ -189,6 +192,7 @@ class QsqlApp(App):
         self.results = {}
         self.running = set()
         self.sheet_stack = []
+        self._catalog_cache.invalidate()
         self._data_shown = None
         self.mode = "cells"
         self.armed = False
@@ -437,6 +441,16 @@ class QsqlApp(App):
     def action_catalog(self) -> None:
         if self.project:
             self._catalog_worker(project_root_node(self.project, connect=self._catalog_connect))
+
+    def action_refetch(self) -> None:
+        """ctrl+r: drop the current catalog sheet's cached frame and reload it."""
+        if self.mode != "data" or not self.sheet_stack:
+            return
+        node: CatalogNode | None = self.sheet_stack[-1].drill
+        if node is None:
+            return
+        self._catalog_cache.invalidate(node)
+        self._catalog_worker(node, replace=True)
 
     def _catalog_connect(self):
         """DuckDB handle for catalog reads: a cursor of the live conduit (it
@@ -688,16 +702,27 @@ class QsqlApp(App):
     # ---------- workers ----------
 
     @work(thread=True, exclusive=True, group="catalog")
-    def _catalog_worker(self, node: CatalogNode) -> None:
+    def _catalog_worker(self, node: CatalogNode, replace: bool = False) -> None:
         self.call_from_thread(setattr, self, "sub_title", f"loading {node.title}…")
         try:
-            frame = node.load()
+            frame, _ = self._catalog_cache.load(node)
         except Exception as exc:
             self.call_from_thread(self.log_line, f"catalog {node.title}: {exc}")
             self.call_from_thread(self.notify, f"catalog: {exc}", severity="error")
             self.call_from_thread(self._restore_subtitle)  # drop the loading… note
             return
-        self.call_from_thread(self._push_sheet, Sheet(frame, title=node.title, drill=node))
+        sheet = Sheet(frame, title=node.title, drill=node)
+        if replace:  # refetch: swap the current sheet, keep the stack shape
+            self.call_from_thread(self._replace_top_sheet, sheet)
+        else:
+            self.call_from_thread(self._push_sheet, sheet)
+
+    def _replace_top_sheet(self, sheet: Sheet) -> None:
+        if self.sheet_stack:
+            self.sheet_stack[-1] = sheet
+            self._refresh_data()
+        else:
+            self._push_sheet(sheet)
 
     @work(thread=True, exclusive=True, group="run")
     def _run_worker(self, select: Optional[list[str]], closure: bool = True) -> None:
@@ -726,6 +751,7 @@ class QsqlApp(App):
                 f"{status} {result.cell} rows={result.rows} {result.elapsed * 1000:.0f}ms -> {result.target}"
             )
         self.running.clear()
+        self._catalog_cache.invalidate()  # outputs and warehouses just changed
         self._refresh_cells()
         self._refresh_detail()
 
@@ -753,6 +779,7 @@ class QsqlApp(App):
         # added cell only exists in the new one (KeyError otherwise)
         self.project = project
         self.hashes = hashes_of(project)
+        self._catalog_cache.invalidate()  # cells/contexts may have changed
         self._refresh_cells()
         self._refresh_detail()
         if not self.armed:
