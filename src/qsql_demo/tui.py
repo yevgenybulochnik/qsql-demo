@@ -9,9 +9,10 @@ The file is edited in your own editor; the TUI never writes it.
 Keys: j/k cell rows . h/l cycle detail tabs . gg/G top/bottom . Enter dive into
 the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
 - hide col . s/gs select . F frequency . I describe . / search, n/N next/prev .
-t raw/rendered . a/A cell/global autorun . r/R run cell/all . V real VisiData .
-o open/switch notebook (auto-opens as a picker when the file doesn't exist) .
-q pop/quit
+S catalog browser (Enter drills context/dataset/table down to field paths,
+q pops) . t raw/rendered . a/A cell/global autorun . r/R run cell/all .
+V real VisiData . o open/switch notebook (auto-opens as a picker when the
+file doesn't exist) . q pop/quit
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, OptionList, RichLog, Static, TabbedContent, TabPane
 from textual.widgets.option_list import Option
 
+from .catalog import CatalogNode, project_root_node
 from .compiler import Project, compile_file
 from .errors import QsqlError
 from .models import RunResult
@@ -110,6 +112,7 @@ class QsqlApp(App):
         Binding("A", "toggle_autorun_global", "autorun*"),
         Binding("F", "frequency", "freq"),
         Binding("I", "describe", "describe"),
+        Binding("S", "catalog", "catalog"),
         Binding("V", "visidata", "vd"),
         Binding("o", "open_notebook", "open"),
         Binding("slash", "search", "search", key_display="/"),
@@ -427,6 +430,29 @@ class QsqlApp(App):
         if self.mode == "data" and self.sheet_stack:
             self._push_sheet(self.sheet_stack[-1].describe())
 
+    def action_catalog(self) -> None:
+        if self.project:
+            self._catalog_worker(project_root_node(self.project, connect=self._catalog_connect))
+
+    def _catalog_connect(self):
+        """DuckDB handle for catalog reads: a cursor of the live conduit (it
+        may already hold sink ATTACHes, and cursors are per-thread-safe), or
+        a throwaway connection before the first run."""
+        if self.session.conn is not None:
+            return self.session.conn.cursor()
+        import duckdb
+
+        return duckdb.connect()
+
+    def _drill_current(self) -> None:
+        sheet = self.sheet_stack[-1]
+        node: CatalogNode = sheet.drill
+        if node.child is None or sheet.frame.height == 0:
+            return  # a leaf (field-path sheet): nowhere further down
+        child = node.child(sheet.frame.row(sheet.cursor[0], named=True))
+        if child is not None:
+            self._catalog_worker(child)
+
     def action_search(self) -> None:
         search = self.query_one("#search", Input)
         search.styles.display = "block"
@@ -574,6 +600,9 @@ class QsqlApp(App):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "cells":
             return
+        if self.mode == "data" and self.sheet_stack and self.sheet_stack[-1].drill is not None:
+            self._drill_current()  # Enter on a catalog sheet goes deeper
+            return
         name = self.current_cell
         if not name:
             return
@@ -588,6 +617,17 @@ class QsqlApp(App):
             self._show_current_data()  # the Data sheet follows the selection
 
     # ---------- workers ----------
+
+    @work(thread=True, exclusive=True, group="catalog")
+    def _catalog_worker(self, node: CatalogNode) -> None:
+        self.call_from_thread(setattr, self, "sub_title", f"loading {node.title}…")
+        try:
+            frame = node.load()
+        except Exception as exc:
+            self.call_from_thread(self.log_line, f"catalog {node.title}: {exc}")
+            self.call_from_thread(self.notify, f"catalog: {exc}", severity="error")
+            return
+        self.call_from_thread(self._push_sheet, Sheet(frame, title=node.title, drill=node))
 
     @work(thread=True, exclusive=True, group="run")
     def _run_worker(self, select: Optional[list[str]], closure: bool = True) -> None:
