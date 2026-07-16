@@ -147,6 +147,91 @@ def test_project_root_node_lists_contexts_and_outputs(tmp_path) -> None:
     assert isinstance(ctx_child, CatalogNode)
 
 
+def test_catalog_directive_declares_extra_browse_targets(tmp_path, monkeypatch) -> None:
+    created: list[dict] = []
+
+    class FakeClient:
+        def list_datasets(self):
+            return [SimpleNamespace(dataset_id="ds1")]
+
+        def list_tables(self, dataset_id):
+            assert dataset_id == "analytics"
+            return [SimpleNamespace(table_id="events", table_type="TABLE")]
+
+    def make(self, spec):
+        created.append(spec)
+        return FakeClient()
+
+    monkeypatch.setattr(BigQueryExecutor, "make_client", make)
+    project = compile_text(
+        "/*@ catalog: { bigquery: [proj-a, proj-b.analytics] } */\n"
+        "-- @cell a\nSELECT 1 AS x;\n",
+        root=tmp_path,
+    )
+    node = project_root_node(project)
+    contexts = node.load().filter(pl.col("kind") == "context")
+    by_name = {row["name"]: row for row in contexts.iter_rows(named=True)}
+    assert "bigquery:proj-a" in by_name
+    assert "bigquery:proj-b/analytics" in by_name
+    assert by_name["bigquery:proj-a"]["detail"] == "@catalog"
+
+    # a bare project drills into its datasets
+    a = node.child(by_name["bigquery:proj-a"])
+    assert a.load()["dataset"].to_list() == ["ds1"]
+    assert created[-1] == {"project": "proj-a"}
+    # project.dataset jumps straight to that dataset's tables
+    b = node.child(by_name["bigquery:proj-b/analytics"])
+    assert b.load()["table"].to_list() == ["events"]
+    assert created[-1] == {"project": "proj-b"}
+
+
+def test_catalog_directive_dedupes_against_cell_contexts(tmp_path) -> None:
+    project = compile_text(
+        "/*@ catalog: { bigquery: proj-a } */\n"  # bare string coerces to a list
+        "-- @cell a\n/*@ input: { bigquery: { project: proj-a } } */\nSELECT 1 AS x;\n",
+        root=tmp_path,
+    )
+    assert project.config.catalog == {"bigquery": ["proj-a"]}
+    frame = project_root_node(project).load()
+    names = frame.filter(pl.col("kind") == "context")["name"].to_list()
+    assert names.count("bigquery:proj-a") == 1  # cell context and @catalog merge
+
+
+def test_catalog_directive_supports_other_engines(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(PostgresExecutor, "make_connection", lambda self, dsn: FakeCatalogPg())
+    project = compile_text(
+        "/*@ catalog: { postgres: ['postgresql://elsewhere/db'] } */\n"
+        "-- @cell a\nSELECT 1 AS x;\n",
+        root=tmp_path,
+    )
+    node = project_root_node(project)
+    contexts = node.load().filter(pl.col("kind") == "context")
+    row = next(
+        r for r in contexts.iter_rows(named=True) if r["name"] == "postgres:postgresql://elsewhere/db"
+    )
+    assert node.child(row).load()["schema"].to_list() == ["public", "analytics"]
+
+
+def test_catalog_directive_is_global_only(tmp_path) -> None:
+    from qsql_demo.errors import QsqlError
+
+    with pytest.raises(QsqlError, match="catalog"):
+        compile_text(
+            "-- @cell a\n-- @catalog: { bigquery: [p] }\nSELECT 1 AS x;\n",
+            root=tmp_path,
+        )
+
+
+def test_catalog_directive_rejects_unknown_engines(tmp_path) -> None:
+    from qsql_demo.errors import QsqlError
+
+    with pytest.raises(QsqlError, match="snowflake"):
+        compile_text(
+            "/*@ catalog: { snowflake: [wh1] } */\n-- @cell a\nSELECT 1 AS x;\n",
+            root=tmp_path,
+        )
+
+
 def test_sqlite_catalog_chain(tmp_path) -> None:
     db = sqlite3.connect(tmp_path / "nums.db")
     db.execute("CREATE TABLE nums (n INTEGER NOT NULL, label TEXT)")
