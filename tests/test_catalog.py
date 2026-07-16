@@ -6,6 +6,7 @@ import polars as pl
 import pytest
 
 from qsql_demo.catalog import (
+    CatalogCache,
     CatalogNode,
     bigquery_context_node,
     bq_field_paths,
@@ -286,6 +287,91 @@ def test_sink_output_node_reads_parquet_struct(tmp_path, con) -> None:
     frame = node.load()
     assert frame["field_path"].to_list() == ["id", "event", "event.name"]
     assert node.child is None
+
+
+# ---------- cache ----------
+
+
+def _counting_node(key: str, n: int, calls: list[int]) -> CatalogNode:
+    def load() -> pl.DataFrame:
+        calls.append(n)
+        return pl.DataFrame({"n": [n]})
+
+    return CatalogNode(title=f"title{n}", load=load, key=key)
+
+
+def test_catalog_cache_serves_repeat_loads_by_key() -> None:
+    calls: list[int] = []
+    cache = CatalogCache()
+    frame, cached = cache.load(_counting_node("a", 1, calls))
+    assert not cached and calls == [1]
+    # drilling recreates nodes; the key, not the instance, is the identity
+    frame, cached = cache.load(_counting_node("a", 2, calls))
+    assert cached and calls == [1]
+    assert frame["n"].to_list() == [1]
+    assert len(cache) == 1
+
+
+def test_catalog_cache_invalidates_one_node_or_everything() -> None:
+    calls: list[int] = []
+    cache = CatalogCache()
+    node_a, node_b = _counting_node("a", 1, calls), _counting_node("b", 2, calls)
+    cache.load(node_a)
+    cache.load(node_b)
+    cache.invalidate(node_a)
+    assert len(cache) == 1
+    _, cached = cache.load(node_a)
+    assert not cached and calls == [1, 2, 1]
+    cache.invalidate()
+    assert len(cache) == 0
+    _, cached = cache.load(node_b)
+    assert not cached
+
+
+def test_catalog_cache_load_failure_caches_nothing() -> None:
+    cache = CatalogCache()
+
+    def boom() -> pl.DataFrame:
+        raise RuntimeError("offline")
+
+    node = CatalogNode(title="x", load=boom)
+    with pytest.raises(RuntimeError):
+        cache.load(node)
+    assert len(cache) == 0
+
+
+def test_cache_key_defaults_to_title() -> None:
+    frame = pl.DataFrame()
+    assert CatalogNode(title="t", load=lambda: frame).cache_key == "t"
+    assert CatalogNode(title="t", load=lambda: frame, key="k").cache_key == "k"
+
+
+def test_node_cache_keys_disambiguate_connections(monkeypatch) -> None:
+    # two DSNs / projects must not share cache entries even where display
+    # titles collide (e.g. leaf "schema.table" on both servers)
+    monkeypatch.setattr(PostgresExecutor, "make_connection", lambda self, dsn: FakeCatalogPg())
+    def pg_leaf(dsn: str) -> CatalogNode:
+        node = postgres_context_node(dsn)
+        tables_node = node.child(node.load().row(0, named=True))
+        return tables_node.child(tables_node.load().row(0, named=True))
+
+    assert pg_leaf("postgresql://one").cache_key != pg_leaf("postgresql://two").cache_key
+
+    class FakeClient:
+        def list_datasets(self):
+            return [SimpleNamespace(dataset_id="ds")]
+
+        def list_tables(self, dataset_id):
+            return [SimpleNamespace(table_id="t", table_type="TABLE")]
+
+    monkeypatch.setattr(BigQueryExecutor, "make_client", lambda self, spec: FakeClient())
+
+    def bq_leaf(project: str) -> CatalogNode:
+        node = bigquery_context_node({"project": project})
+        tables_node = node.child(node.load().row(0, named=True))
+        return tables_node.child(tables_node.load().row(0, named=True))
+
+    assert bq_leaf("p1").cache_key != bq_leaf("p2").cache_key
 
 
 def test_sink_output_node_duckdb_sink_needs_the_conduit_cursor(tmp_path) -> None:
