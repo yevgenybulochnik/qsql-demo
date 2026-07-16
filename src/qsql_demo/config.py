@@ -29,7 +29,30 @@ def _compose(name: str, plugins: PluginRegistry, scopes: tuple[Scope, ...]) -> t
     bases = tuple(
         type(p).Config for p in plugins.by_scope(*scopes) if type(p).Config is not EmptyConfig
     )
+    _check_validator_names(bases)
     return create_model(name, __base__=bases or (EmptyConfig,))
+
+
+def _check_validator_names(bases: tuple[type[BaseModel], ...]) -> None:
+    """Composition is multi-inheritance, so two plugin Configs defining
+    validators under the same attribute name would silently shadow one
+    another in the MRO — fail loudly instead."""
+    owners: dict[str, type[BaseModel]] = {}
+    for base in bases:
+        decorators = base.__pydantic_decorators__
+        names = {
+            attr
+            for group in ("validators", "field_validators", "model_validators")
+            for attr in getattr(decorators, group, {})
+        }
+        for attr in names:
+            if attr in owners and owners[attr] is not base:
+                raise ConfigError(
+                    f"validator name collision: {attr!r} is defined by both"
+                    f" {owners[attr].__qualname__} and {base.__qualname__};"
+                    " rename one — composed configs shadow duplicates silently"
+                )
+            owners[attr] = base
 
 
 def deep_merge(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:

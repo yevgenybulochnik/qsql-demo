@@ -162,8 +162,9 @@ def sink_output_node(
     return CatalogNode(title=f"schema({cell_name})", load=load)
 
 
-def bigquery_context_node(spec: dict[str, Any]) -> CatalogNode:
-    """datasets -> tables -> field paths, on one client memoized per chain."""
+def bigquery_context_node(spec: dict[str, Any], dataset: str | None = None) -> CatalogNode:
+    """datasets -> tables -> field paths, on one client memoized per chain.
+    With ``dataset``, the chain starts at that dataset's tables instead."""
     holder: dict[str, Any] = {}
 
     def client() -> Any:
@@ -175,13 +176,7 @@ def bigquery_context_node(spec: dict[str, Any]) -> CatalogNode:
 
     title = f"bigquery:{spec.get('project')}"
 
-    def load() -> pl.DataFrame:
-        datasets = [d.dataset_id for d in client().list_datasets()]
-        return pl.DataFrame({"dataset": datasets}, schema={"dataset": pl.Utf8})
-
-    def child(row: dict[str, Any]) -> CatalogNode:
-        ds = row["dataset"]
-
+    def dataset_node(ds: str) -> CatalogNode:
         def tables_load() -> pl.DataFrame:
             tables = list(client().list_tables(ds))
             return pl.DataFrame(
@@ -201,6 +196,16 @@ def bigquery_context_node(spec: dict[str, Any]) -> CatalogNode:
             )
 
         return CatalogNode(title=f"{title}/{ds}", load=tables_load, child=tables_child)
+
+    if dataset is not None:
+        return dataset_node(dataset)
+
+    def load() -> pl.DataFrame:
+        datasets = [d.dataset_id for d in client().list_datasets()]
+        return pl.DataFrame({"dataset": datasets}, schema={"dataset": pl.Utf8})
+
+    def child(row: dict[str, Any]) -> CatalogNode:
+        return dataset_node(row["dataset"])
 
     return CatalogNode(title=title, load=load, child=child)
 
@@ -374,8 +379,28 @@ _CONTEXT_BUILDERS: dict[str, Callable[[Any, Path], CatalogNode | None]] = {
 }
 
 
+def _bigquery_target(target: str) -> tuple[str, CatalogNode]:
+    """A @catalog bigquery target: ``project`` or ``project.dataset``."""
+    project, _, dataset = target.partition(".")
+    if dataset:
+        return f"bigquery:{project}/{dataset}", bigquery_context_node(
+            {"project": project}, dataset=dataset
+        )
+    return f"bigquery:{project}", bigquery_context_node({"project": project})
+
+
+# @catalog directive targets: engine -> (target string, root) -> (row name, node)
+_CATALOG_TARGETS: dict[str, Callable[[str, Path], tuple[str, CatalogNode]]] = {
+    "bigquery": lambda target, root: _bigquery_target(target),
+    "postgres": lambda target, root: (f"postgres:{target}", postgres_context_node(target)),
+    "sqlite": lambda target, root: (f"sqlite:{target}", sqlite_context_node(target, root)),
+    "duckdb": lambda target, root: (f"duckdb:{target}", duckdb_context_node(target, root)),
+}
+
+
 def project_root_node(project: Project, connect: Callable[[], Any] | None = None) -> CatalogNode:
-    """Top level: the project's engine contexts (deduped) plus cell outputs."""
+    """Top level: the project's engine contexts (deduped), @catalog-declared
+    browse targets, and cell outputs."""
     from .registry import EXECUTORS
 
     contexts: list[tuple[str, str, Any]] = []  # (context_key, engine, config)
@@ -387,7 +412,20 @@ def project_root_node(project: Project, connect: Callable[[], Any] | None = None
             seen.add(key)
             contexts.append((key, cell.engine, cell.config))
 
+    declared: dict[str, CatalogNode] = {}  # row name -> ready node
     rows = [("context", key, engine, "") for key, engine, _ in contexts]
+    for engine, targets in (getattr(project.config, "catalog", None) or {}).items():
+        make_target = _CATALOG_TARGETS.get(engine)
+        if make_target is None:
+            continue
+        for target in targets:
+            name, node = make_target(target, project.root)
+            if name in seen:
+                continue  # a cell's context already covers it
+            seen.add(name)
+            declared[name] = node
+            rows.append(("context", name, engine, "@catalog"))
+
     for name in project.order:
         cell = project.cells[name]
         rows.append(("output", name, cell.engine, f"{cell.engine} → {cell.sink_type}"))
@@ -402,6 +440,8 @@ def project_root_node(project: Project, connect: Callable[[], Any] | None = None
         if row["kind"] == "output":
             cell = project.cells[row["name"]]
             return sink_output_node(cell.name, cell.config, project.root, connect=connect)
+        if row["name"] in declared:
+            return declared[row["name"]]
         engine, config = by_key[row["name"]]
         builder = _CONTEXT_BUILDERS.get(engine)
         return builder(config, project.root) if builder else None

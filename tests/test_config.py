@@ -124,6 +124,24 @@ def test_third_party_config_plugin_extends_models() -> None:
         resolve_global({"row_limit": 5})
 
 
+def test_duplicate_validator_names_across_plugins_are_rejected() -> None:
+    # pydantic composes plugin Configs by inheritance, so a validator whose
+    # attribute name repeats an existing one (e.g. Sources' _shape) silently
+    # shadows it in the MRO — the guard must fail loudly instead
+    @plugin
+    class Shadowing(Plugin):
+        class Config(BaseModel):
+            widgets: list[str] = qfield([])
+
+            @field_validator("widgets")
+            @classmethod
+            def _shape(cls, v: list[str]) -> list[str]:  # clashes with Sources
+                return v
+
+    with pytest.raises(ConfigError, match="_shape"):
+        build_models()
+
+
 def test_override_keys_scoped_to_target_model() -> None:
     # global-only override keys are dropped when resolving cells, not errors
     @plugin

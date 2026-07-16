@@ -213,6 +213,35 @@ class Schema(Plugin):
 
 
 @plugin
+class Catalog(Plugin):
+    """The catalog: directive — extra schema-browser targets (TUI ``S``)
+    beyond the contexts cells' inputs imply. Mapping engine -> targets:
+    bigquery takes ``project`` or ``project.dataset``; postgres takes DSNs;
+    sqlite/duckdb take database paths."""
+
+    scope = Scope.GLOBAL
+
+    class Config(BaseModel):
+        catalog: dict[str, list[str]] = qfield({}, merge=Merge.DEEP)
+
+        # nb: validator names must be unique across all composed plugin
+        # Configs — a duplicate (e.g. Sources' _shape) is silently shadowed
+        # in the merged model's MRO
+        @field_validator("catalog", mode="before")
+        @classmethod
+        def _catalog_targets(cls, v: dict[str, Any]) -> dict[str, Any]:
+            out: dict[str, Any] = {}
+            for engine, targets in (v or {}).items():
+                if engine not in EXECUTORS:
+                    raise ValueError(
+                        f"catalog engine {engine!r} is not a registered executor"
+                        f" (have: {', '.join(EXECUTORS.names())})"
+                    )
+                out[engine] = [targets] if isinstance(targets, str) else list(targets)
+            return out
+
+
+@plugin
 class Tags(Plugin):
     class Config(BaseModel):
         tags: list[str] = qfield([], merge=Merge.EXTEND)
