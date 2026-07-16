@@ -7,6 +7,7 @@ so they unit-test without any terminal.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 import polars as pl
 
@@ -18,6 +19,9 @@ class Sheet:
     cursor: tuple[int, int] = (0, 0)
     hidden: tuple[str, ...] = ()
     selected: frozenset[int] = field(default_factory=frozenset)
+    # opaque catalog payload (never invoked here): replace()-based ops carry
+    # it, derived sheets (freq/describe) drop it
+    drill: Any = None
 
     @property
     def columns(self) -> list[str]:
@@ -77,6 +81,28 @@ class Sheet:
 
     def describe(self) -> Sheet:
         return Sheet(frame=self.frame.describe(), title=f"describe({self.title})")
+
+    def filtered(self, pattern: str) -> Sheet:
+        if not pattern:
+            return self
+        # nested columns (struct/list) don't cast to strings; match the rest
+        cols = [c for c in self.columns if not self.frame.schema[c].is_nested()]
+        if not cols:
+            return self
+        matcher = pl.any_horizontal(
+            [pl.col(c).cast(pl.Utf8).fill_null("").str.contains(f"(?i){pattern}") for c in cols]
+        )
+        try:
+            frame = self.frame.filter(matcher)
+        except pl.exceptions.ComputeError:  # incomplete regex while typing
+            return self
+        return replace(
+            self,
+            frame=frame,
+            title=f"filter({pattern})",
+            cursor=(0, self.cursor[1]),
+            selected=frozenset(),
+        )
 
     def search(self, needle: str, reverse: bool = False) -> Sheet:
         if not needle or self.frame.height == 0:
