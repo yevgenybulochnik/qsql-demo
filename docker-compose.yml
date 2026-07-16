@@ -2,9 +2,11 @@
 #
 #   docker compose up -d --wait
 #
-# Two databases on one server (created on first boot of an empty volume):
-#   qsql       — long-lived data: stress seeds, manual TUI sessions
-#   qsql_test  — pytest's sandbox (tests create/drop their own tables)
+# Three databases on one server (created on first boot of an empty volume):
+#   qsql        — long-lived data: stress seeds, manual TUI sessions
+#   qsql_test   — pytest's sandbox (tests create/drop their own tables)
+#   qsql_claims — synthetic healthcare claims for smoke tests
+#                 (seed per examples/claims_seed.sql)
 # The named volume keeps seeded data across `docker compose down` and reboots.
 
 services:

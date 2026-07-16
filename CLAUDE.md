@@ -46,7 +46,9 @@ first `@cell`) inherited by every cell.
 
 - `uv run pytest` — markers `network` / `bigquery` / `postgres` are deselected by default.
   `docker compose up -d --wait` stands up Postgres (databases: `qsql` for stress/manual
-  data, `qsql_test` for pytest), then `uv run --extra postgres pytest -m postgres` runs
+  data, `qsql_test` for pytest, `qsql_claims` for the synthetic-claims smoke test —
+  seed per `examples/claims_seed.sql`, drive with `examples/claims.qsql`), then
+  `uv run --extra postgres pytest -m postgres` runs
   the integration tests; they skip when the server is down. Override the DSN with
   `QSQL_TEST_PG_DSN`. Everything except the cloud-gated tests:
   `uv run --extra postgres pytest -m "not (network or bigquery)"` — an explicit `-m`
