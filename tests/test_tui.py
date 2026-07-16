@@ -506,6 +506,56 @@ async def test_y_yanks_current_cell_or_selected_column_values(notebook, monkeypa
         assert copied[-1] == expected  # SQL-ready select-list snippet
 
 
+@pytest.mark.terminal
+def test_yank_reaches_the_terminal_clipboard_and_pastes_into_nvim(tmp_path) -> None:
+    """End-to-end OSC 52: yank in the real TUI under tmux, confirm the escape
+    sequence lands in tmux's clipboard buffer, then paste it into a live
+    neovim session editing the notebook. Needs tmux + nvim on PATH; run with
+    `pytest -m terminal`. If this passes but the system clipboard stays empty
+    in your terminal, the break is between the terminal and the OS (tmux
+    set-clipboard, kitty clipboard_control, WSLg bridge, ...)."""
+    import shutil as sh
+    import subprocess
+    import time
+
+    if not (sh.which("tmux") and sh.which("nvim")):
+        pytest.skip("needs tmux and nvim")
+    (tmp_path / "base.qsql").write_text(
+        "-- @cell events\n"
+        "SELECT 1 AS id, {'name': 'x', 'params': [{'key': 'k', 'value': 1}]} AS event;\n"
+    )
+    sock = f"qsqlyank{time.time_ns() % 100000}"
+
+    def t(*args: str) -> str:
+        return subprocess.run(
+            ["tmux", "-L", sock, *args], capture_output=True, text=True
+        ).stdout
+
+    def keys(*args: str, wait: float = 1.0) -> None:
+        t("send-keys", *args)
+        time.sleep(wait)
+
+    try:
+        t("new-session", "-d", "-x", "110", "-y", "30", "-c", str(tmp_path), "qsql tui base.qsql")
+        t("set-option", "-g", "set-clipboard", "on")
+        time.sleep(5)
+        keys("R", wait=3.0)  # run all
+        keys("S", wait=2.0)  # catalog
+        keys("j", "Enter", wait=2.0)  # drill into the output's field paths
+        keys("l", "s", "j", "s", "y")  # select two field paths, yank
+        assert t("show-buffer") == "id,\nevent"  # OSC 52 captured by the terminal
+        t("new-window", "-c", str(tmp_path), "nvim -u NONE base.qsql")
+        time.sleep(2)
+        keys("G", "o", "-- yanked:", "Enter")  # open a line in insert mode
+        t("paste-buffer")
+        time.sleep(1)
+        keys("Escape")
+        keys(":wq", "Enter", wait=2.0)
+        assert (tmp_path / "base.qsql").read_text().endswith("-- yanked:\nid,\nevent\n")
+    finally:
+        subprocess.run(["tmux", "-L", sock, "kill-server"], capture_output=True)
+
+
 async def test_run_all_populates_results_and_dive(notebook) -> None:
     app = QsqlApp(path=notebook, watch=False, auto_run=False)
     async with app.run_test() as pilot:
