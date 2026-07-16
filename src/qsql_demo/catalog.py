@@ -19,7 +19,13 @@ import polars as pl
 if TYPE_CHECKING:
     from .compiler import Project
 
-FIELD_PATH_SCHEMA = {"column": pl.Utf8, "field_path": pl.Utf8, "type": pl.Utf8, "mode": pl.Utf8}
+FIELD_PATH_SCHEMA = {
+    "column": pl.Utf8,
+    "field_path": pl.Utf8,
+    "type": pl.Utf8,
+    "mode": pl.Utf8,
+    "description": pl.Utf8,
+}
 
 
 @dataclass(frozen=True)
@@ -69,17 +75,18 @@ class CatalogCache:
             self._frames.pop(node.cache_key, None)
 
 
-def _field_path_frame(rows: list[tuple[str, str, str, str]]) -> pl.DataFrame:
+def _field_path_frame(rows: list[tuple[str, str, str, str, str]]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=FIELD_PATH_SCHEMA, orient="row")
 
 
 def bq_field_paths(fields: Iterable[Any]) -> pl.DataFrame:
-    """Flatten BigQuery SchemaFields (.name/.field_type/.mode/.fields) depth-first."""
-    rows: list[tuple[str, str, str, str]] = []
+    """Flatten BigQuery SchemaFields (.name/.field_type/.mode/.fields/.description)
+    depth-first."""
+    rows: list[tuple[str, str, str, str, str]] = []
 
     def walk(field: Any, column: str, prefix: str) -> None:
         path = f"{prefix}.{field.name}" if prefix else field.name
-        rows.append((column, path, field.field_type, field.mode or ""))
+        rows.append((column, path, field.field_type, field.mode or "", field.description or ""))
         for sub in field.fields or ():
             walk(sub, column, path)
 
@@ -93,13 +100,14 @@ def duckdb_field_paths(columns: Sequence[str], types: Sequence[Any]) -> pl.DataF
 
     ``.children`` raises on scalars, so recursion gates on ``.id``; fixed-size
     arrays carry a non-type child (the size), filtered by the ``.id`` check.
+    LIMIT-0 relation types carry no comments, so descriptions stay empty.
     """
-    rows: list[tuple[str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str]] = []
 
     def walk(name: str, type_: Any, column: str, prefix: str) -> None:
         path = f"{prefix}.{name}" if prefix else name
         mode = "REPEATED" if type_.id in ("list", "array", "map") else ""
-        rows.append((column, path, str(type_), mode))
+        rows.append((column, path, str(type_), mode, ""))
         descend(type_, column, path)
 
     def descend(type_: Any, column: str, path: str) -> None:
@@ -233,14 +241,19 @@ def postgres_context_node(dsn: str) -> CatalogNode:
 
             def columns_load() -> pl.DataFrame:
                 rows = query(
-                    "SELECT column_name, data_type, is_nullable"
+                    "SELECT column_name, data_type, is_nullable,"
+                    " col_description(format('%%I.%%I', table_schema, table_name)::regclass,"
+                    "                 ordinal_position)"
                     " FROM information_schema.columns"
                     " WHERE table_schema = %s AND table_name = %s"
                     " ORDER BY ordinal_position",
                     (schema, table),
                 )
                 return _field_path_frame(
-                    [(n, n, t, "REQUIRED" if nullable == "NO" else "") for n, t, nullable in rows]
+                    [
+                        (n, n, t, "REQUIRED" if nullable == "NO" else "", comment or "")
+                        for n, t, nullable, comment in rows
+                    ]
                 )
 
             return CatalogNode(
@@ -293,7 +306,7 @@ def sqlite_context_node(spec: Any, root: Path) -> CatalogNode:
                 con.close()
             return _field_path_frame(
                 [
-                    (name, name, type_ or "", "REQUIRED" if notnull else "")
+                    (name, name, type_ or "", "REQUIRED" if notnull else "", "")
                     for _, name, type_, notnull, *_ in info
                 ]
             )

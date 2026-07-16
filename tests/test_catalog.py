@@ -303,6 +303,29 @@ def test_sink_output_node_reads_parquet_struct(tmp_path, con) -> None:
     assert node.child is None
 
 
+@pytest.mark.postgres
+def test_postgres_catalog_chain_live(pg_dsn) -> None:
+    import psycopg
+
+    with psycopg.connect(pg_dsn, autocommit=True) as con:
+        con.execute("DROP TABLE IF EXISTS catalog_live")
+        con.execute("CREATE TABLE catalog_live (id int NOT NULL, email text)")
+        con.execute("COMMENT ON COLUMN catalog_live.id IS 'primary key'")
+    try:
+        node = postgres_context_node(pg_dsn)
+        assert "public" in node.load()["schema"].to_list()
+        tables_node = node.child({"schema": "public"})
+        assert "catalog_live" in tables_node.load()["table"].to_list()
+        cols = tables_node.child({"table": "catalog_live"}).load()
+        assert cols.rows() == [
+            ("id", "id", "integer", "REQUIRED", "primary key"),
+            ("email", "email", "text", "", ""),
+        ]
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as con:
+            con.execute("DROP TABLE IF EXISTS catalog_live")
+
+
 # ---------- cache ----------
 
 
