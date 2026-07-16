@@ -33,6 +33,40 @@ class CatalogNode:
     title: str
     load: Callable[[], pl.DataFrame]
     child: Optional[Callable[[dict[str, Any]], Optional["CatalogNode"]]] = None
+    # stable cache identity across node re-creation (drilling rebuilds nodes);
+    # set it wherever the display title isn't globally unique
+    key: str | None = None
+
+    @property
+    def cache_key(self) -> str:
+        return self.key if self.key is not None else self.title
+
+
+class CatalogCache:
+    """Loaded frames by node cache_key: browsing revisits levels, loads are
+    remote. Invalidate one node (user refetch) or everything (a run, a
+    recompile, or a notebook switch changed the world)."""
+
+    def __init__(self) -> None:
+        self._frames: dict[str, pl.DataFrame] = {}
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def load(self, node: CatalogNode) -> tuple[pl.DataFrame, bool]:
+        """The node's frame and whether it came from the cache."""
+        key = node.cache_key
+        if key in self._frames:
+            return self._frames[key], True
+        frame = node.load()
+        self._frames[key] = frame
+        return frame, False
+
+    def invalidate(self, node: CatalogNode | None = None) -> None:
+        if node is None:
+            self._frames.clear()
+        else:
+            self._frames.pop(node.cache_key, None)
 
 
 def _field_path_frame(rows: list[tuple[str, str, str, str]]) -> pl.DataFrame:
@@ -155,6 +189,7 @@ def bigquery_context_node(spec: dict[str, Any]) -> CatalogNode:
             return CatalogNode(
                 title=f"{ds}.{table}",
                 load=lambda: bq_field_paths(client().get_table(f"{ds}.{table}").schema),
+                key=f"{title}/{ds}.{table}",
             )
 
         return CatalogNode(title=f"{title}/{ds}", load=tables_load, child=tables_child)
@@ -208,11 +243,20 @@ def postgres_context_node(dsn: str) -> CatalogNode:
                     [(n, n, t, "REQUIRED" if nullable == "NO" else "") for n, t, nullable in rows]
                 )
 
-            return CatalogNode(title=f"{schema}.{table}", load=columns_load)
+            return CatalogNode(
+                title=f"{schema}.{table}",
+                load=columns_load,
+                key=f"postgres:{dsn}/{schema}.{table}",
+            )
 
-        return CatalogNode(title=f"postgres/{schema}", load=tables_load, child=tables_child)
+        return CatalogNode(
+            title=f"postgres/{schema}",
+            load=tables_load,
+            child=tables_child,
+            key=f"postgres:{dsn}/{schema}",
+        )
 
-    return CatalogNode(title="postgres", load=load, child=child)
+    return CatalogNode(title="postgres", load=load, child=child, key=f"postgres:{dsn}")
 
 
 def _spec_path(spec: Any) -> str | None:
