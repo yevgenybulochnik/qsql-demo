@@ -9,6 +9,8 @@ The file is edited in your own editor; the TUI never writes it.
 Keys: j/k cell rows . h/l cycle detail tabs . gg/G top/bottom . Enter dive into
 the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
 - hide col . s/gs select . F frequency . I describe . / search, n/N next/prev .
+f filter rows by regex (live; Enter commits, Esc cancels) . y yank the cell
+(or selected rows' column, ",\n"-joined) to the clipboard .
 S catalog browser (Enter drills context/dataset/table down to field paths,
 q pops) . t raw/rendered . a/A cell/global autorun . r/R run cell/all .
 V real VisiData . o open/switch notebook (auto-opens as a picker when the
@@ -146,6 +148,8 @@ class QsqlApp(App):
         self._row_names: list[str] = []
         self._pending_g = False
         self._last_search = ""
+        self._input_mode = "search"  # what the bottom input edits: search | filter
+        self._filter_base: Sheet | None = None  # sheet being live-filtered
         # what the #data table currently displays; holding the frame reference
         # keeps identity comparison sound (ids can't be recycled)
         self._data_shown: tuple[Any, tuple[str, ...], frozenset[int]] | None = None
@@ -454,9 +458,45 @@ class QsqlApp(App):
             self._catalog_worker(child)
 
     def action_search(self) -> None:
+        self._input_mode = "search"
+        self._show_input("search...")
+
+    def _show_input(self, placeholder: str) -> None:
         search = self.query_one("#search", Input)
+        search.value = ""  # a cancelled filter/search must not leave stale text
+        search.placeholder = placeholder
         search.styles.display = "block"
         search.focus()
+
+    def _show_filter(self) -> None:
+        if self.mode != "data" or not self.sheet_stack:
+            return
+        self._input_mode = "filter"
+        self._filter_base = self.sheet_stack[-1]
+        self._show_input("filter rows by regex...")
+
+    def _cancel_filter(self) -> None:
+        if self._filter_base is not None and self.sheet_stack:
+            self.sheet_stack[-1] = self._filter_base
+            self._refresh_data()
+        self._filter_base = None
+        self._input_mode = "search"
+
+    def _yank(self) -> None:
+        if self.mode != "data" or not self.sheet_stack:
+            return
+        sheet = self.sheet_stack[-1]
+        if sheet.frame.height == 0:
+            return
+        col = sheet.current_column
+        if sheet.selected:
+            values = [str(sheet.frame[col][i]) for i in sorted(sheet.selected)]
+            text = ",\n".join(values)  # paste-ready as a SQL select list
+        else:
+            values = [str(sheet.frame[col][sheet.cursor[0]])]
+            text = values[0]
+        self.copy_to_clipboard(text)
+        self.notify(f"copied {len(values)} value(s) from {col!r}")
 
     def action_page(self, direction: int) -> None:
         if self.mode == "data":
@@ -487,6 +527,8 @@ class QsqlApp(App):
             return
         if self.query_one("#search", Input).has_focus:
             if event.key == "escape":
+                if self._input_mode == "filter":
+                    self._cancel_filter()
                 self._hide_search()
             return
         ch = event.character
@@ -517,6 +559,10 @@ class QsqlApp(App):
             self._mutate_sheet(lambda s: s.hide_current())
         elif ch == "s":
             self._mutate_sheet(lambda s: s.toggle_select())
+        elif ch == "f":
+            self._show_filter()
+        elif ch == "y":
+            self._yank()
         elif ch == "n":
             self._repeat_search(reverse=False)
         elif ch == "N":
@@ -559,7 +605,24 @@ class QsqlApp(App):
         if self._last_search:
             self._mutate_sheet(lambda s: s.search(self._last_search, reverse=reverse))
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if self._input_mode != "filter" or self._filter_base is None or not self.sheet_stack:
+            return
+        # live: re-filter the captured base on every keystroke
+        self.sheet_stack[-1] = self._filter_base.filtered(event.value.strip())
+        self._refresh_data()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if self._input_mode == "filter":
+            event.input.value = ""
+            self._hide_search()
+            base, self._filter_base = self._filter_base, None
+            self._input_mode = "search"
+            if base is not None and self.sheet_stack and self.sheet_stack[-1] is not base:
+                # commit: keep the filtered sheet on top, base beneath (q restores)
+                self.sheet_stack.insert(len(self.sheet_stack) - 1, base)
+                self._refresh_data()
+            return
         needle = event.value.strip()
         self._last_search = needle
         event.input.value = ""
