@@ -356,6 +356,63 @@ async def test_enter_on_plain_data_sheet_still_resets_preview(notebook) -> None:
         assert app.sheet_stack[-1].title == "users"
 
 
+async def test_f_live_filters_commits_on_enter_cancels_on_escape(notebook) -> None:
+    from textual.widgets import Input
+
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        full_height = app.sheet_stack[-1].frame.height
+        await pilot.press("f")
+        assert app.query_one("#search", Input).has_focus
+        await pilot.press("u", "s", "e", "r", "s")
+        top = app.sheet_stack[-1]  # live: already narrowed while typing
+        assert top.title == "filter(users)"
+        assert top.frame.height == 1
+        assert top.drill is not None  # a filtered catalog still drills
+        await pilot.press("escape")  # cancel: unfiltered sheet restored
+        assert app.sheet_stack[-1].frame.height == full_height
+        assert len(app.sheet_stack) == 1
+        await pilot.press("f")
+        await pilot.press("e", "v", "e", "n", "t")
+        await pilot.press("enter")  # commit: filtered pushed above the base
+        assert len(app.sheet_stack) == 2
+        assert app.sheet_stack[-1].title == "filter(event)"
+        assert app.sheet_stack[-1].frame.height == 2  # events, active_user_events
+        await pilot.press("q")
+        assert app.sheet_stack[-1].frame.height == full_height
+
+
+async def test_y_yanks_current_cell_or_selected_column_values(notebook, monkeypatch) -> None:
+    copied: list[str] = []
+    monkeypatch.setattr(QsqlApp, "copy_to_clipboard", lambda self, text: copied.append(text))
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("j", "enter")  # drill into the users field paths
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        sheet = app.sheet_stack[-1]
+        assert sheet.frame.columns == ["column", "field_path", "type", "mode"]
+        await pilot.press("l")  # cursor onto field_path
+        await pilot.press("y")  # no selection: the current cell
+        assert copied == [sheet.frame["field_path"][0]]
+        await pilot.press("s", "j", "s")  # select rows 0 and 1
+        await pilot.press("y")
+        expected = ",\n".join(sheet.frame["field_path"][:2].to_list())
+        assert copied[-1] == expected  # SQL-ready select-list snippet
+
+
 async def test_run_all_populates_results_and_dive(notebook) -> None:
     app = QsqlApp(path=notebook, watch=False, auto_run=False)
     async with app.run_test() as pilot:
