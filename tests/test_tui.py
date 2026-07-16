@@ -305,6 +305,57 @@ async def test_wide_frames_render_a_column_window(tmp_path) -> None:
         assert f"cols {60 - app.MAX_DATA_COLS + 1}-60/60" in app.sub_title
 
 
+async def test_catalog_browser_opens_drills_and_pops(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.mode == "data"
+        top = app.sheet_stack[-1]
+        assert top.title == "catalog"
+        assert top.drill is not None
+        kinds = top.frame["kind"].to_list()
+        assert kinds.count("output") == 3  # one per scaffold cell
+        await pilot.press("j")  # onto the first output row (one duckdb context)
+        assert app.sheet_stack[-1].frame.row(1, named=True)["kind"] == "output"
+        await pilot.press("enter")  # drill into the cell's field paths
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 2
+        leaf = app.sheet_stack[-1]
+        assert leaf.frame.columns == ["column", "field_path", "type", "mode"]
+        assert leaf.frame.height > 0
+        await pilot.press("enter")  # leaves don't drill further
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 2
+        await pilot.press("q")  # pop back to the catalog
+        assert len(app.sheet_stack) == 1
+        assert app.sheet_stack[-1].title == "catalog"
+        await pilot.press("q")
+        assert app.mode == "cells"
+
+
+async def test_enter_on_plain_data_sheet_still_resets_preview(notebook) -> None:
+    # regression guard for the drill interception: sheets without a drill
+    # payload keep the old Enter behavior (reset to the cell's preview)
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")  # dive
+        await pilot.press("F")  # freq sheet on top (drill-less)
+        assert len(app.sheet_stack) == 2
+        await pilot.press("enter")
+        assert len(app.sheet_stack) == 1
+        assert app.sheet_stack[-1].title == "users"
+
+
 async def test_run_all_populates_results_and_dive(notebook) -> None:
     app = QsqlApp(path=notebook, watch=False, auto_run=False)
     async with app.run_test() as pilot:
