@@ -470,15 +470,15 @@ async def test_live_filter_keeps_column_widths_stable(notebook) -> None:
         await app.workers.wait_for_complete()
         await pilot.pause()
         table = app.query_one("#data", DataTable)
-        widths_before = [c.content_width for c in table.columns.values()]
+        widths_before = [c.get_render_width(table) for c in table.columns.values()]
         await pilot.press("f")
         await pilot.press("u", "s", "e", "r")  # narrows to a subset
-        assert [c.content_width for c in table.columns.values()] == widths_before
+        assert [c.get_render_width(table) for c in table.columns.values()] == widths_before
         await pilot.press("z", "z", "z")  # zero matches: still no collapse
         assert app.sheet_stack[-1].frame.height == 0
-        assert [c.content_width for c in table.columns.values()] == widths_before
+        assert [c.get_render_width(table) for c in table.columns.values()] == widths_before
         await pilot.press("escape")
-        assert [c.content_width for c in table.columns.values()] == widths_before
+        assert [c.get_render_width(table) for c in table.columns.values()] == widths_before
 
 
 async def test_y_yanks_current_cell_or_selected_column_values(notebook, monkeypatch) -> None:

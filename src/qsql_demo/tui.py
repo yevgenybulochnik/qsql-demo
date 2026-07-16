@@ -340,12 +340,14 @@ class QsqlApp(App):
             # frames make rebuilds expensive and cursor moves happen per keypress
             self._data_shown = shown
             frame = sheet.frame.select(window).head(self.MAX_DATA_ROWS)
-            table.clear(columns=True)
-            table.add_columns(*(str(c) for c in frame.columns))
-            table.add_rows(
+            rows = [
                 (("▸" if idx in sheet.selected else "") + str(row[0]), *map(str, row[1:]))
                 for idx, row in enumerate(frame.rows())
-            )
+            ]
+            table.clear(columns=True)
+            for name, width in zip(window, self._column_widths(window, rows)):
+                table.add_column(str(name), width=width)
+            table.add_rows(rows)
         height = min(sheet.frame.height, self.MAX_DATA_ROWS)
         if height:
             table.move_cursor(row=min(sheet.cursor[0], height - 1), column=cursor_col - start)
@@ -354,6 +356,20 @@ class QsqlApp(App):
         if len(cols) > self.MAX_DATA_COLS:
             span = f" · cols {start + 1}-{start + len(window)}/{len(cols)}"
         self.sub_title = f"{sheet.title} · {sheet.frame.height}x{len(cols)}{picked}{span}"
+
+    def _column_widths(self, window: list[str], rows: list[tuple[str, ...]]) -> list[int]:
+        """Explicit column widths for the data table. While a filter is being
+        typed the shown rows are a shrinking subset — measure the captured
+        base sheet instead, so widths hold still keystroke to keystroke."""
+        base = self._filter_base
+        if base is not None and all(c in base.frame.columns for c in window):
+            source = base.frame.select(window).head(self.MAX_DATA_ROWS)
+            rows = [tuple(map(str, row)) for row in source.rows()]
+        widths = [len(str(name)) for name in window]
+        for row in rows:
+            for i, cell in enumerate(row):
+                widths[i] = max(widths[i], len(cell))
+        return widths
 
     def _mutate_sheet(self, fn) -> None:
         if self.mode != "data" or not self.sheet_stack:
