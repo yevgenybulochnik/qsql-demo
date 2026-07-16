@@ -340,6 +340,57 @@ async def test_catalog_browser_opens_drills_and_pops(notebook) -> None:
         assert app.mode == "cells"
 
 
+async def test_catalog_cache_serves_redrills_and_ctrl_r_refetches(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("j", "enter")  # field paths of users, now cached
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 2
+        (notebook.parent / "data" / "users.parquet").unlink()
+        await pilot.press("q", "enter")  # re-drill: cache serves despite the missing file
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 2
+        assert app.sheet_stack[-1].frame.columns == ["column", "field_path", "type", "mode"]
+        await pilot.press("ctrl+r")  # invalidate + refetch: the reload now fails
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 2  # the stale sheet stays visible
+        await pilot.press("q", "enter")  # entry really gone: fresh drill fails too
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 1
+
+
+async def test_run_and_notebook_switch_clear_the_catalog_cache(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app._catalog_cache) > 0
+        await pilot.press("q", "q", "R")  # a run changes outputs/warehouses
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app._catalog_cache) == 0
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app._catalog_cache) > 0
+        app._load_notebook(notebook)  # switching notebooks resets everything
+        assert len(app._catalog_cache) == 0
+
+
 async def test_catalog_load_error_clears_loading_subtitle(notebook) -> None:
     # drilling into an output that never ran fails (no parquet yet); the
     # "loading …" subtitle must not stick around after the error toast
