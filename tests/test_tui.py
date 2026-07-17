@@ -621,7 +621,7 @@ async def test_question_mark_opens_help_overlay_covering_all_key_layers(notebook
         for key in keys.split("/")
     }
     # footer bindings and on_key-only keys alike are covered
-    for key in ("r", "R", "S", "y", "f", "gg", "[", "]", "-", "n", "?"):
+    for key in ("r", "R", "S", "y", "f", "gg", "[", "]", "-", "n", "?", "|", "w"):
         assert key in documented, f"{key!r} missing from the help overlay"
 
     app = QsqlApp(path=notebook, watch=False, auto_run=False)
@@ -707,3 +707,60 @@ async def test_catalog_shows_every_column_of_a_wide_postgres_table(pg_dsn, tmp_p
     finally:
         with psycopg.connect(pg_dsn, autocommit=True) as con:
             con.execute("DROP TABLE IF EXISTS wide_catalog")
+
+
+async def test_vertical_split_copies_sheet_and_navigates_independently(notebook) -> None:
+    # | splits the data pane into two side-by-side sheets; the new (right) pane
+    # starts as a copy, then each pane navigates on its own drilling stack
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")  # dive into the first cell's data sheet
+        await pilot.pause()
+        assert not app.split
+        assert not app.query_one("#data2", DataTable).display
+
+        await pilot.press("|")  # split -> focus lands on the new right pane
+        await pilot.pause()
+        assert app.split
+        assert app.active_pane == 1
+        assert app.query_one("#data2", DataTable).display
+        assert app.panes[0][-1].frame is app.panes[1][-1].frame  # a copy
+
+        await pilot.press("w")  # switch focus back to the left pane
+        await pilot.pause()
+        assert app.active_pane == 0
+
+        left_before = app.panes[0][-1].frame
+        right_before = app.panes[1][-1].frame
+        await pilot.press("]")  # sort mutates only the focused (left) pane
+        await pilot.pause()
+        assert app.panes[0][-1].frame is not left_before
+        assert app.panes[1][-1].frame is right_before
+
+        await pilot.press("|")  # collapse: keep the focused pane
+        await pilot.pause()
+        assert not app.split
+        assert not app.query_one("#data2", DataTable).display
+
+
+async def test_split_pane_q_collapses_to_the_other_pane(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("|")  # split; right pane holds a single sheet
+        await pilot.pause()
+        assert app.split and app.active_pane == 1
+
+        await pilot.press("q")  # empties the focused pane -> collapse, keep the other
+        await pilot.pause()
+        assert not app.split
+        assert app.mode == "data"  # still viewing the surviving pane
+        assert len(app.panes) == 1 and app.panes[0]
+        assert not app.query_one("#data2", DataTable).display
