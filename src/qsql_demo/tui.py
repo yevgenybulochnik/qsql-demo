@@ -340,7 +340,7 @@ class QsqlApp(App):
 
     # rows of terminal below which the detail tabs are dropped and the cell
     # list fills the screen (header + a usable detail pane don't both fit)
-    COMPACT_HEIGHT = 12
+    COMPACT_HEIGHT = 16
 
     def on_resize(self, event: events.Resize) -> None:
         try:
