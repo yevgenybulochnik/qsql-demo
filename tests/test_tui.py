@@ -20,7 +20,9 @@ async def test_missing_file_shows_picker_and_template_creates(tmp_path) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         assert isinstance(app.screen, NotebookPicker)
-        await pilot.press("enter")  # sole option: create base.qsql from the template
+        await pilot.press("enter")  # sole option: create from the template
+        await pilot.pause()
+        await pilot.press("enter")  # accept the prefilled name (base.qsql)
         await pilot.pause()
         assert target.exists()
         assert app.project and "users" in app.project.cells
@@ -81,6 +83,8 @@ async def test_user_templates_offered_and_seed_the_requested_file(tmp_path, monk
         assert any("template 'metrics'" in p for p in prompts)
         await pilot.press("down", "enter")  # base first, metrics second
         await pilot.pause()
+        await pilot.press("enter")  # accept the prefilled name (the requested file)
+        await pilot.pause()
         # the user template seeded the *requested* filename
         assert (workdir / "base.qsql").read_text().startswith("-- @cell tpl")
         assert list(app.project.cells) == ["tpl"]
@@ -107,6 +111,97 @@ async def test_o_switches_between_notebooks_and_resets_state(tmp_path) -> None:
         assert list(app.project.cells) == ["solo"]
         assert app.results == {}      # fresh notebook, fresh state
         assert app.armed is False     # arming is per-notebook
+
+
+async def test_template_create_prompts_for_name_and_creates_named_file(tmp_path) -> None:
+    from textual.widgets import Input
+
+    from qsql_demo.tui import NotebookPicker
+
+    alpha = write_scaffold(tmp_path / "alpha.qsql")
+    app = QsqlApp(path=alpha, watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+        assert isinstance(app.screen, NotebookPicker)
+        await pilot.press("j", "enter")  # past `open alpha` onto the create option
+        await pilot.pause()
+        name_input = app.screen.query_one("#picker_name", Input)
+        assert name_input.display  # the prompt appeared...
+        assert name_input.value == "base.qsql"  # ...prefilled with the default
+        name_input.value = "custom"  # rename; missing suffix gets appended
+        await pilot.press("enter")
+        await pilot.pause()
+        assert (tmp_path / "custom.qsql").exists()
+        assert app.path.name == "custom.qsql"
+        assert app.project and "users" in app.project.cells
+
+
+async def test_template_name_collision_warns_and_stays(tmp_path) -> None:
+    from textual.widgets import Input, Static
+
+    from qsql_demo.tui import NotebookPicker
+
+    alpha = write_scaffold(tmp_path / "alpha.qsql")
+    app = QsqlApp(path=alpha, watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+        await pilot.press("j", "enter")  # the create option
+        await pilot.pause()
+        name_input = app.screen.query_one("#picker_name", Input)
+        name_input.value = "alpha"  # alpha.qsql already exists
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, NotebookPicker)  # still up
+        status = str(app.screen.query_one("#picker_status", Static).render())
+        assert "exists" in status
+        name_input.value = "fresh.qsql"  # a free name goes through
+        await pilot.press("enter")
+        await pilot.pause()
+        assert (tmp_path / "fresh.qsql").exists()
+        assert app.path.name == "fresh.qsql"
+
+
+async def test_template_prompt_escape_returns_to_list_not_cancel(tmp_path) -> None:
+    from textual.widgets import Input
+
+    from qsql_demo.tui import NotebookPicker
+
+    alpha = write_scaffold(tmp_path / "alpha.qsql")
+    app = QsqlApp(path=alpha, watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+        await pilot.press("j", "enter")  # the create option -> name prompt
+        await pilot.pause()
+        assert app.screen.query_one("#picker_name", Input).display
+        await pilot.press("escape")  # back to the list, picker stays
+        await pilot.pause()
+        assert isinstance(app.screen, NotebookPicker)
+        assert not app.screen.query_one("#picker_name", Input).display
+        await pilot.press("escape")  # now it cancels
+        await pilot.pause()
+        assert not isinstance(app.screen, NotebookPicker)
+        assert app.path == alpha  # nothing created, notebook unchanged
+
+
+async def test_switch_picker_offers_templates_even_when_default_name_taken(tmp_path) -> None:
+    from textual.widgets import OptionList
+
+    base = write_scaffold(tmp_path / "base.qsql")  # the default target is taken
+    app = QsqlApp(path=base, watch=False)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+        ol = app.screen.query_one(OptionList)
+        prompts = [str(ol.get_option_at_index(i).prompt) for i in range(ol.option_count)]
+        # naming makes the collision solvable, so the template stays on offer
+        assert any("template 'base'" in p for p in prompts)
 
 
 async def test_boots_lists_cells_and_navigates(notebook) -> None:
