@@ -16,7 +16,8 @@ q pops; levels are cached — ctrl+r refetches the current one) .
 | split the data pane into two side-by-side sheets, w switch the focused one .
 t raw/rendered . a/A cell/global autorun . r/R run cell/all .
 V real VisiData . o open/switch notebook (auto-opens as a picker when the
-file doesn't exist) . ? help overlay (all keys) . q pop/quit
+file doesn't exist; creating from a template prompts for the new file's
+name) . ? help overlay (all keys) . q pop/quit
 """
 
 from __future__ import annotations
@@ -49,19 +50,24 @@ from .watcher import hashes_of, plan_rerun
 
 class NotebookPicker(ModalScreen):
     """Choose a notebook in the directory, or create one from a starting
-    template (builtin, plus any under ~/.qsql/templates)."""
+    template (builtin, plus any under ~/.qsql/templates). Picking a template
+    prompts for the new file's name, prefilled with a default — Enter accepts,
+    Esc steps back to the list."""
 
     BINDINGS = [Binding("escape", "cancel", "cancel")]
 
     CSS = """
     NotebookPicker { align: center middle; }
     #picker { width: 64; max-height: 20; border: solid $primary; padding: 1; }
+    #picker_name { display: none; }
+    #picker_status { color: $warning; }
     """
 
     def __init__(self, directory: Path, creates: list[tuple[str, str]]) -> None:
         super().__init__()
         self.directory = directory
-        self.creates = creates  # (target filename, template name) pairs
+        self.creates = creates  # (default target filename, template name) pairs
+        self._template: str | None = None  # set while the name prompt is up
 
     def compose(self) -> ComposeResult:
         # notebooks only: .qsql, or .qsql.sql for editors that want SQL
@@ -77,11 +83,15 @@ class NotebookPicker(ModalScreen):
         with Vertical(id="picker"):
             yield Static("select a notebook — Enter opens, Esc cancels")
             yield OptionList(*options)
+            yield Input(id="picker_name", placeholder="new notebook name...")
+            yield Static(id="picker_status")
 
     def on_mount(self) -> None:
         self.query_one(OptionList).focus()
 
     def on_key(self, event: events.Key) -> None:
+        if self.query_one("#picker_name", Input).has_focus:
+            return  # typing a name: j/k are just characters
         if event.character == "j":
             self.query_one(OptionList).action_cursor_down()
         elif event.character == "k":
@@ -90,11 +100,39 @@ class NotebookPicker(ModalScreen):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         kind, _, value = (event.option.id or "").partition(":")
         if kind == "template":
-            self.dismiss(("template", self.creates[int(value)]))
+            target, self._template = self.creates[int(value)]
+            name_input = self.query_one("#picker_name", Input)
+            name_input.value = target  # the default name, ready to accept or edit
+            name_input.styles.display = "block"
+            name_input.focus()
         else:
             self.dismiss(("open", value))
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if self._template is None:
+            return
+        name = event.value.strip()
+        if not name:
+            return
+        if not name.endswith((".qsql", ".qsql.sql")):
+            name += ".qsql"
+        if (self.directory / name).exists():
+            self.query_one("#picker_status", Static).update(
+                f"{name} already exists — pick another name"
+            )
+            return
+        self.dismiss(("template", (name, self._template)))
+
+    def _close_prompt(self) -> None:
+        self._template = None
+        self.query_one("#picker_name", Input).styles.display = "none"
+        self.query_one("#picker_status", Static).update("")
+        self.query_one(OptionList).focus()
+
     def action_cancel(self) -> None:
+        if self._template is not None:  # Esc from the name prompt: back to the list
+            self._close_prompt()
+            return
         self.dismiss(None)
 
 
@@ -386,15 +424,16 @@ class QsqlApp(App):
         from .scaffold import template_names
 
         directory = self.path.parent if str(self.path.parent) else Path(".")
-        creates: list[tuple[str, str]] = []
+        # the target is only the *default* for the picker's name prompt, so a
+        # taken default no longer hides the template
         if not self.path.exists():
             # the requested file is missing: any template may seed it
             creates = [(self.path.name, name) for name in template_names()]
-        else:  # switching: offer each template under its own filename
-            for name in template_names():
-                target = "base.qsql" if name == "base" else f"{name}.qsql"
-                if not (directory / target).exists():
-                    creates.append((target, name))
+        else:  # switching: suggest each template's own filename
+            creates = [
+                ("base.qsql" if name == "base" else f"{name}.qsql", name)
+                for name in template_names()
+            ]
 
         def chosen(result: tuple[str, Any] | None) -> None:
             if result is None:
