@@ -260,3 +260,44 @@ def test_server_registers_the_lsp_features_and_maps_diagnostics() -> None:
     assert lsp_diag.range.start.line == 2
     assert lsp_diag.severity == types.DiagnosticSeverity.Error
     assert lsp_diag.source == "sqlglot" and lsp_diag.message == "boom"
+
+
+def test_completion_scopes_each_join_alias_to_its_own_ref(tmp_path) -> None:
+    from qsql_demo.lsp.analysis import Analyzer
+
+    text = (
+        "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
+        "-- @cell users\nSELECT 1 AS user_id, 'ada' AS name;\n"
+        "-- @cell events\nSELECT 1 AS user_id, 'click' AS event;\n"
+        "-- @cell down\n"
+        "SELECT e. FROM {{ ref('users') }} u JOIN {{ ref('events') }} e USING (user_id)\n"
+    )
+    from qsql_demo.runner import run_project
+
+    nb = tmp_path / "n.qsql"
+    nb.write_text(text)
+    run_project(compile_file(nb), select=["users", "events"])
+    scoped = Analyzer().completions(text, tmp_path, 7, len("SELECT e."))
+    labels = {c.label for c in scoped if c.kind == "field"}
+    assert labels == {"user_id", "event"}  # events only — not users' columns
+
+
+def test_completion_derives_cte_alias_columns_from_its_projection(tmp_path) -> None:
+    from qsql_demo.lsp.analysis import Analyzer
+
+    text = (
+        "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
+        "-- @cell users\nSELECT 1 AS user_id, 'ada' AS name;\n"
+        "-- @cell cte_cell\n"
+        "WITH w AS (SELECT user_id, name AS member_name FROM {{ ref('users') }})\n"
+        "SELECT w. FROM w\n"
+    )
+    from qsql_demo.runner import run_project
+
+    nb = tmp_path / "n.qsql"
+    nb.write_text(text)
+    run_project(compile_file(nb), select=["users"])
+    scoped = Analyzer().completions(text, tmp_path, 6, len("SELECT w."))
+    labels = {c.label for c in scoped if c.kind == "field"}
+    # the CTE's own projected columns, output alias included
+    assert labels == {"user_id", "member_name"}
