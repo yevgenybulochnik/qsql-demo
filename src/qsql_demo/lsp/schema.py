@@ -21,10 +21,20 @@ from typing import Any, Callable
 import duckdb
 import polars as pl
 
+from dataclasses import dataclass
+
 from .. import catalog
 from ..sources import reader_for
 
 Column = tuple[str, str]  # (name, type)
+
+
+@dataclass(frozen=True)
+class Projection:
+    """A relation whose columns are known statically from a SELECT projection
+    (a CTE's output), no introspection needed. Types are unknown."""
+
+    columns: tuple[str, ...]
 
 
 class SchemaCache:
@@ -129,6 +139,8 @@ def columns_for(
     (possibly schema-qualified) engine-native table name string."""
     from .mask import Ref, Source
 
+    if isinstance(relation, Projection):
+        return [(c, "") for c in relation.columns]
     if isinstance(relation, Ref):
         key, fn = ("ref", relation.cell), lambda: ref_columns(project, relation.cell)
     elif isinstance(relation, Source):

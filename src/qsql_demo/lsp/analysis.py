@@ -96,9 +96,15 @@ class Analyzer:
         if cell is None:
             return items
 
-        scope = _resolve_scope(project, cell)
         alias_m = re.search(r"([A-Za-z_]\w*)\.\w*$", prefix)
         alias = alias_m.group(1).lower() if alias_m else None
+        # the very token being completed (`e.`) is a dangling dot that makes
+        # sqlglot drop the whole FROM clause — patch it to a harmless literal
+        # of the same length so the join scope survives mid-keystroke
+        source = cell.source
+        if alias_m is not None:
+            source = _patch_dangling(cell, line, character, alias_m.start(1))
+        scope = _resolve_scope(project, cell, source)
         relations = [scope[alias]] if alias and alias in scope else list(scope.values())
 
         seen: set[str] = set()
@@ -186,11 +192,27 @@ def _cell_at(project: Any, line1: int) -> Any | None:
     return None
 
 
-def _resolve_scope(project: Any, cell: Any) -> dict[str, Any]:
+def _patch_dangling(cell: Any, line: int, character: int, token_start: int) -> str:
+    """Replace the in-progress ``alias.partial`` token at the cursor with a
+    same-length ``1``-literal so the statement parses (length-preserving)."""
+    src_lines = cell.source.splitlines()
+    idx = line - (cell.line - 1)  # file line (0-indexed) -> cell-source line
+    if not (0 <= idx < len(src_lines)):
+        return cell.source
+    row = src_lines[idx]
+    end = character
+    while end < len(row) and (row[end].isalnum() or row[end] == "_"):
+        end += 1  # swallow the token's remainder past the cursor
+    src_lines[idx] = row[:token_start] + "1" + " " * (end - token_start - 1) + row[end:]
+    return "\n".join(src_lines)
+
+
+def _resolve_scope(project: Any, cell: Any, source: str | None = None) -> dict[str, Any]:
     """alias/name (lowercased) -> relation: a mask Ref/Source tag for a
-    ``{{ ref/source }}`` placeholder, else the (qualified) table-name string."""
+    ``{{ ref/source }}`` placeholder, a Projection for a CTE alias, else the
+    (qualified) table-name string."""
     dialect = _DIALECT.get(cell.engine)
-    masked, spans = mask_jinja(cell.source)
+    masked, spans = mask_jinja(source if source is not None else cell.source)
     by_placeholder = {s.name: s.tag for s in spans if s.name}
     try:
         tree = sqlglot.parse_one(masked, dialect=dialect, error_level=ErrorLevel.IGNORE)
@@ -207,4 +229,17 @@ def _resolve_scope(project: Any, cell: Any) -> dict[str, Any]:
             scope[key] = by_placeholder[table.name]
         else:  # engine-native table, keep any schema qualifier
             scope[key] = f"{table.db}.{table.name}" if table.db else table.name
+    # a CTE's columns are its projection — statically known, overriding the
+    # bare table-name entry its FROM reference produced
+    from .schema import Projection
+
+    for cte in tree.find_all(exp.CTE):
+        key = (cte.alias or "").lower()
+        cols = tuple(
+            p.alias_or_name
+            for p in getattr(cte.this, "expressions", [])
+            if p.alias_or_name and p.alias_or_name != "*"
+        )
+        if key and cols:
+            scope[key] = Projection(cols)
     return scope
