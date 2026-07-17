@@ -13,6 +13,7 @@ f filter rows by regex (live; Enter commits, Esc cancels) . y yank the cell
 (or selected rows' column, ",\n"-joined) to the clipboard .
 S catalog browser (Enter drills context/dataset/table down to field paths,
 q pops; levels are cached — ctrl+r refetches the current one) .
+| split the data pane into two side-by-side sheets, w switch the focused one .
 t raw/rendered . a/A cell/global autorun . r/R run cell/all .
 V real VisiData . o open/switch notebook (auto-opens as a picker when the
 file doesn't exist) . ? help overlay (all keys) . q pop/quit
@@ -31,7 +32,7 @@ from rich.syntax import Syntax
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, OptionList, RichLog, Static, TabbedContent, TabPane
@@ -150,6 +151,10 @@ class HelpScreen(ModalScreen):
             ("ctrl+r", "refetch the current level"),
             ("q", "pop back a level"),
         ]),
+        ("Split", [
+            ("|", "split the data pane in two (or unsplit)"),
+            ("w", "switch the focused pane (each navigates on its own)"),
+        ]),
         ("General", [
             ("?", "this help"),
             ("q", "pop / quit"),
@@ -192,6 +197,14 @@ class QsqlApp(App):
     /* too short for both sections: drop the detail tabs, let the cell list fill */
     #body.-compact #detail { display: none; }
     #body.-compact #cells { height: 1fr; max-height: 100%; }
+    /* vertical split: two side-by-side sheets. #data2 shows only when split;
+       borders (and the accent-highlighted focused pane) appear only then, so
+       the single-pane look is unchanged. */
+    #data, #data2 { width: 1fr; }
+    #data2 { display: none; }
+    #data_panes.-split #data2 { display: block; }
+    #data_panes.-split #data, #data_panes.-split #data2 { border: solid $panel; }
+    #data.-active, #data2.-active { border: solid $accent; }
     """
 
     BINDINGS = [
@@ -234,7 +247,11 @@ class QsqlApp(App):
         self.autorun_global = True
         self.show_rendered = True
         self.mode = "cells"  # or "data"
-        self.sheet_stack: list[Sheet] = []
+        # one drilling stack per pane; a vertical split appends a second stack.
+        # sheet_stack (property, below) is the active pane's stack, so the rest
+        # of the app is oblivious to the split.
+        self.panes: list[list[Sheet]] = [[]]
+        self.active_pane = 0
         self.hashes: dict[str, str] = {}
         self._row_names: list[str] = []
         self._pending_g = False
@@ -242,9 +259,68 @@ class QsqlApp(App):
         self._input_mode = "search"  # what the bottom input edits: search | filter
         self._filter_base: Sheet | None = None  # sheet being live-filtered
         self._catalog_cache = CatalogCache()  # cleared on run/recompile/switch
-        # what the #data table currently displays; holding the frame reference
-        # keeps identity comparison sound (ids can't be recycled)
-        self._data_shown: tuple[Any, tuple[str, ...], frozenset[int]] | None = None
+        # what each pane's table currently displays (one slot per pane table);
+        # holding the frame reference keeps identity comparison sound
+        self._data_shown: list[tuple[Any, tuple[str, ...], frozenset[int], int] | None] = [None, None]
+
+    # ---------- panes (vertical split) ----------
+
+    @property
+    def sheet_stack(self) -> list[Sheet]:
+        """The focused pane's drilling stack. Reads and in-place mutations
+        (append/pop/insert/[-1]=) operate on the active pane; assigning a new
+        list replaces the active pane's stack (see the setter)."""
+        return self.panes[self.active_pane]
+
+    @sheet_stack.setter
+    def sheet_stack(self, value: list[Sheet]) -> None:
+        self.panes[self.active_pane] = value
+
+    @property
+    def split(self) -> bool:
+        return len(self.panes) > 1
+
+    PANE_TABLE_IDS = ("#data", "#data2")
+
+    def _pane_table(self, idx: int) -> DataTable:
+        return self.query_one(self.PANE_TABLE_IDS[idx], DataTable)
+
+    def _active_table(self) -> DataTable:
+        return self._pane_table(self.active_pane)
+
+    def _sync_split_layout(self) -> None:
+        self.query_one("#data_panes").set_class(self.split, "-split")
+        for i in (0, 1):
+            self._pane_table(i).set_class(self.split and i == self.active_pane, "-active")
+
+    def _collapse_panes(self, keep: int) -> None:
+        """Drop back to a single pane, keeping stack ``keep``."""
+        self.panes = [self.panes[keep]]
+        self.active_pane = 0
+        self._data_shown = [None, None]
+        self._pane_table(1).clear(columns=True)
+        self._sync_split_layout()
+
+    def _toggle_split(self) -> None:
+        if self.mode != "data" or not self.sheet_stack:
+            return
+        if self.split:
+            self._collapse_panes(self.active_pane)  # unsplit: keep what's focused
+        else:
+            # a shallow copy is an independent stack (Sheets are frozen), so the
+            # panes diverge as each is navigated; focus lands on the new pane
+            self.panes.append(list(self.panes[self.active_pane]))
+            self.active_pane = 1
+            self._data_shown = [None, None]
+            self._sync_split_layout()
+        self._refresh_data()
+
+    def _switch_pane(self) -> None:
+        if not self.split:
+            return
+        self.active_pane ^= 1
+        self._sync_split_layout()
+        self._refresh_data()  # moves the -active border and the active sub_title
 
     # ---------- layout ----------
 
@@ -256,7 +332,9 @@ class QsqlApp(App):
                 with TabPane("SQL", id="tab_sql"):
                     yield Static(id="sql_view")
                 with TabPane("Data", id="tab_data"):
-                    yield DataTable(id="data", cursor_type="cell")
+                    with Horizontal(id="data_panes"):
+                        yield DataTable(id="data", cursor_type="cell")
+                        yield DataTable(id="data2", cursor_type="cell")
                 with TabPane("Config", id="tab_config"):
                     yield Static(id="config_view")
                 with TabPane("Log", id="tab_log"):
@@ -268,6 +346,7 @@ class QsqlApp(App):
         table = self.query_one("#cells", DataTable)
         table.add_columns("cell", "engine → sink", "auto", "status", "rows", "ms")
         self.query_one("#data", DataTable).can_focus = False
+        self.query_one("#data2", DataTable).can_focus = False
         table.focus()
         if self.path.exists():
             self._load_notebook(self.path)
@@ -280,9 +359,11 @@ class QsqlApp(App):
         self.title = f"qsql · {self.path.name}"
         self.results = {}
         self.running = set()
-        self.sheet_stack = []
+        self.panes = [[]]
+        self.active_pane = 0
         self._catalog_cache.invalidate()
-        self._data_shown = None
+        self._data_shown = [None, None]
+        self._sync_split_layout()
         self.mode = "cells"
         self.armed = False
         self.project = None
@@ -428,12 +509,19 @@ class QsqlApp(App):
         return None if sheet.drill is not None else self.MAX_DATA_ROWS
 
     def _refresh_data(self) -> None:
-        table = self.query_one("#data", DataTable)
-        if not self.sheet_stack:
-            table.clear(columns=True)
-            self._data_shown = None
-            return
-        sheet = self.sheet_stack[-1]
+        # render every pane; the identity-cached _data_shown[idx] keeps the
+        # unfocused pane from rebuilding when only the focused one changed
+        for idx in (0, 1):
+            table = self._pane_table(idx)
+            if idx >= len(self.panes) or not self.panes[idx]:
+                table.clear(columns=True)
+                self._data_shown[idx] = None
+                continue
+            self._render_pane(idx, table)
+
+    def _render_pane(self, idx: int, table: DataTable) -> None:
+        active = idx == self.active_pane
+        sheet = self.panes[idx][-1]
         cap = self._row_cap(sheet)
         cols = sheet.columns
         cursor_col = min(sheet.cursor[1], max(len(cols) - 1, 0))
@@ -442,40 +530,42 @@ class QsqlApp(App):
             start = max(0, min(cursor_col - self.MAX_DATA_COLS // 2, len(cols) - self.MAX_DATA_COLS))
         window = cols[start : start + self.MAX_DATA_COLS]
         shown = (sheet.frame, sheet.hidden, sheet.selected, start)
-        if (
-            self._data_shown is None
-            or self._data_shown[0] is not shown[0]
-            or self._data_shown[1:] != shown[1:]
-        ):
+        prev = self._data_shown[idx]
+        if prev is None or prev[0] is not shown[0] or prev[1:] != shown[1:]:
             # rebuild only when content or the column window changed; wide
             # frames make rebuilds expensive and cursor moves happen per keypress
-            self._data_shown = shown
+            self._data_shown[idx] = shown
             frame = sheet.frame.select(window)
             if cap is not None:
                 frame = frame.head(cap)
             rows = [
-                (("▸" if idx in sheet.selected else "") + str(row[0]), *map(str, row[1:]))
-                for idx, row in enumerate(frame.rows())
+                (("▸" if i in sheet.selected else "") + str(row[0]), *map(str, row[1:]))
+                for i, row in enumerate(frame.rows())
             ]
             table.clear(columns=True)
-            for name, width in zip(window, self._column_widths(window, rows)):
+            for name, width in zip(window, self._column_widths(window, rows, active=active)):
                 table.add_column(str(name), width=width)
             table.add_rows(rows)
         height = sheet.frame.height if cap is None else min(sheet.frame.height, cap)
         if height:
             table.move_cursor(row=min(sheet.cursor[0], height - 1), column=cursor_col - start)
-        picked = f" · {len(sheet.selected)} selected" if sheet.selected else ""
-        span = ""
-        if len(cols) > self.MAX_DATA_COLS:
-            span = f" · cols {start + 1}-{start + len(window)}/{len(cols)}"
-        self.sub_title = f"{sheet.title} · {sheet.frame.height}x{len(cols)}{picked}{span}"
+        if active:
+            picked = f" · {len(sheet.selected)} selected" if sheet.selected else ""
+            span = ""
+            if len(cols) > self.MAX_DATA_COLS:
+                span = f" · cols {start + 1}-{start + len(window)}/{len(cols)}"
+            side = ("L / " if self.active_pane == 0 else "R / ") if self.split else ""
+            self.sub_title = f"{side}{sheet.title} · {sheet.frame.height}x{len(cols)}{picked}{span}"
 
-    def _column_widths(self, window: list[str], rows: list[tuple[str, ...]]) -> list[int]:
+    def _column_widths(
+        self, window: list[str], rows: list[tuple[str, ...]], active: bool = True
+    ) -> list[int]:
         """Explicit column widths for the data table. While a filter is being
         typed the shown rows are a shrinking subset — measure the captured
-        base sheet instead, so widths hold still keystroke to keystroke."""
+        base sheet instead, so widths hold still keystroke to keystroke. Only
+        the focused pane is ever being filtered, so the base applies there."""
         base = self._filter_base
-        if base is not None and all(c in base.frame.columns for c in window):
+        if active and base is not None and all(c in base.frame.columns for c in window):
             source = base.frame.select(window)
             cap = self._row_cap(base)
             if cap is not None:
@@ -532,6 +622,10 @@ class QsqlApp(App):
         if self.mode == "data" and self.sheet_stack:
             self.sheet_stack.pop()
             if self.sheet_stack:
+                self._refresh_data()
+                return
+            if self.split:  # focused pane emptied: keep the other, full width
+                self._collapse_panes(1 - self.active_pane)
                 self._refresh_data()
                 return
             self.mode = "cells"
@@ -719,6 +813,10 @@ class QsqlApp(App):
             self._repeat_search(reverse=False)
         elif ch == "N":
             self._repeat_search(reverse=True)
+        elif ch == "|":
+            self._toggle_split()
+        elif ch == "w":
+            self._switch_pane()
 
     TAB_ORDER = ["tab_sql", "tab_data", "tab_config", "tab_log"]
 
@@ -733,7 +831,7 @@ class QsqlApp(App):
         keyboard move would resume from the stale (often top) cursor and snap
         the view away from what the user is looking at. A no-op during normal
         keyboard navigation, where the cursor is always already on screen."""
-        table = self.query_one("#data", DataTable)
+        table = self._active_table()
         height = table.scrollable_content_region.height
         if not height:
             return sheet
@@ -818,6 +916,8 @@ class QsqlApp(App):
                 self._show_current_data()
         else:
             self.mode = "cells"
+            if self.split:  # the split is a data-mode concern; drop it on the way out
+                self._collapse_panes(0)
             self.sheet_stack = []
             self._refresh_detail()
 
