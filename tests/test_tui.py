@@ -287,6 +287,40 @@ async def test_data_table_not_rebuilt_on_cursor_moves(notebook) -> None:
         assert rebuilds
 
 
+async def test_keyboard_move_resumes_from_viewport_after_mouse_scroll(tmp_path) -> None:
+    # the mouse wheel scrolls the data table's viewport but not the Sheet
+    # cursor; a following j/k must resume from what's on screen, not snap the
+    # view back to the stale cursor near the top of the sheet
+    nb = tmp_path / "tall.qsql"
+    nb.write_text("-- @engine: duckdb\n-- @cell big\nSELECT range AS n FROM range(80);\n")
+    app = QsqlApp(path=nb, watch=False, auto_run=False)
+    async with app.run_test(size=(80, 16)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")  # dive into the data sheet
+        await pilot.pause()
+        table = app.query_one("#data", DataTable)
+        assert app.sheet_stack[-1].cursor[0] == 0
+
+        # simulate a mouse-wheel scroll to the bottom: viewport moves, cursor doesn't
+        table.scroll_to(y=table.max_scroll_y, animate=False)
+        await pilot.pause()
+        first = int(table.scroll_y)
+        assert first > 1  # really scrolled away from the row-0 cursor
+        assert app.sheet_stack[-1].cursor[0] == 0
+
+        await pilot.press("k")  # up from the visible window, not from row 0
+        assert app.sheet_stack[-1].cursor[0] == first - 1
+
+        # j likewise resumes from the visible window
+        table.scroll_to(y=table.max_scroll_y, animate=False)
+        await pilot.pause()
+        first = int(table.scroll_y)
+        await pilot.press("j")
+        assert app.sheet_stack[-1].cursor[0] == first + 1
+
+
 async def test_wide_frames_render_a_column_window(tmp_path) -> None:
     cols = ", ".join(f"{i} AS c{i}" for i in range(60))
     f = tmp_path / "wide.sql"
