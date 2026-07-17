@@ -421,6 +421,12 @@ class QsqlApp(App):
     MAX_DATA_ROWS = 200
     MAX_DATA_COLS = 40  # window rendered around the cursor; re-windows at the edges
 
+    def _row_cap(self, sheet: Sheet) -> int | None:
+        # catalog sheets list one row per column/table/dataset — never truncate
+        # them, or a wide table would hide fields. data previews stay capped so
+        # rebuilding a wide frame stays cheap on every cursor keypress.
+        return None if sheet.drill is not None else self.MAX_DATA_ROWS
+
     def _refresh_data(self) -> None:
         table = self.query_one("#data", DataTable)
         if not self.sheet_stack:
@@ -428,6 +434,7 @@ class QsqlApp(App):
             self._data_shown = None
             return
         sheet = self.sheet_stack[-1]
+        cap = self._row_cap(sheet)
         cols = sheet.columns
         cursor_col = min(sheet.cursor[1], max(len(cols) - 1, 0))
         start = 0
@@ -443,7 +450,9 @@ class QsqlApp(App):
             # rebuild only when content or the column window changed; wide
             # frames make rebuilds expensive and cursor moves happen per keypress
             self._data_shown = shown
-            frame = sheet.frame.select(window).head(self.MAX_DATA_ROWS)
+            frame = sheet.frame.select(window)
+            if cap is not None:
+                frame = frame.head(cap)
             rows = [
                 (("▸" if idx in sheet.selected else "") + str(row[0]), *map(str, row[1:]))
                 for idx, row in enumerate(frame.rows())
@@ -452,7 +461,7 @@ class QsqlApp(App):
             for name, width in zip(window, self._column_widths(window, rows)):
                 table.add_column(str(name), width=width)
             table.add_rows(rows)
-        height = min(sheet.frame.height, self.MAX_DATA_ROWS)
+        height = sheet.frame.height if cap is None else min(sheet.frame.height, cap)
         if height:
             table.move_cursor(row=min(sheet.cursor[0], height - 1), column=cursor_col - start)
         picked = f" · {len(sheet.selected)} selected" if sheet.selected else ""
@@ -467,7 +476,10 @@ class QsqlApp(App):
         base sheet instead, so widths hold still keystroke to keystroke."""
         base = self._filter_base
         if base is not None and all(c in base.frame.columns for c in window):
-            source = base.frame.select(window).head(self.MAX_DATA_ROWS)
+            source = base.frame.select(window)
+            cap = self._row_cap(base)
+            if cap is not None:
+                source = source.head(cap)
             rows = [tuple(map(str, row)) for row in source.rows()]
         widths = [len(str(name)) for name in window]
         for row in rows:

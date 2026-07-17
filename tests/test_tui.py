@@ -623,3 +623,53 @@ async def test_short_terminal_collapses_to_cells_only(notebook) -> None:
         await pilot.resize_terminal(100, 40)  # room again
         await pilot.pause()
         assert detail.display  # restored
+
+
+@pytest.mark.postgres
+async def test_catalog_shows_every_column_of_a_wide_postgres_table(pg_dsn, tmp_path) -> None:
+    # a table with >1000 columns must show ALL of them in the catalog sheet —
+    # each column is one field-path row, so the data-preview row cap must not
+    # truncate a schema listing
+    import psycopg
+
+    ncols = 1100
+    cols = ", ".join(f"c{i} int" for i in range(ncols))
+    with psycopg.connect(pg_dsn, autocommit=True) as con:
+        con.execute("DROP TABLE IF EXISTS wide_catalog")
+        con.execute(f"CREATE TABLE wide_catalog ({cols})")
+    try:
+        nb = tmp_path / "wide.qsql"
+        nb.write_text(
+            "-- @engine: postgres\n"
+            f"/*@ input: {{ postgres: {{ dsn: '{pg_dsn}' }} }} */\n\n"
+            "-- @cell probe\nSELECT 1 AS x;\n"
+        )
+        app = QsqlApp(path=nb, watch=False, auto_run=False)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+
+            async def drill_to(pred) -> None:
+                sheet = app.sheet_stack[-1]
+                idx = next(
+                    i for i, r in enumerate(sheet.frame.iter_rows(named=True)) if pred(r)
+                )
+                app.sheet_stack[-1] = sheet.top().move(idx, 0)
+                await pilot.press("enter")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+
+            await pilot.press("S")  # catalog root
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await drill_to(lambda r: r["kind"] == "context" and r["engine"] == "postgres")
+            await drill_to(lambda r: r["schema"] == "public")
+            await drill_to(lambda r: r["table"] == "wide_catalog")
+
+            leaf = app.sheet_stack[-1]
+            assert leaf.frame.columns == ["column", "field_path", "type", "mode", "description"]
+            assert leaf.frame.height == ncols  # the fetch has every column
+            table = app.query_one("#data", DataTable)
+            assert table.row_count == ncols  # ...and every column is rendered
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as con:
+            con.execute("DROP TABLE IF EXISTS wide_catalog")
