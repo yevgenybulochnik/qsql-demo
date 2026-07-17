@@ -15,7 +15,7 @@ S catalog browser (Enter drills context/dataset/table down to field paths,
 q pops; levels are cached — ctrl+r refetches the current one) .
 t raw/rendered . a/A cell/global autorun . r/R run cell/all .
 V real VisiData . o open/switch notebook (auto-opens as a picker when the
-file doesn't exist) . q pop/quit
+file doesn't exist) . ? help overlay (all keys) . q pop/quit
 """
 
 from __future__ import annotations
@@ -31,7 +31,8 @@ from rich.syntax import Syntax
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, OptionList, RichLog, Static, TabbedContent, TabPane
 from textual.widgets.option_list import Option
@@ -96,6 +97,90 @@ class NotebookPicker(ModalScreen):
         self.dismiss(None)
 
 
+class HelpScreen(ModalScreen):
+    """`?` overlay: every key, grouped. Most sheet/vim keys live only in
+    on_key and show in no footer binding, so this is the single place they
+    are all documented. ``?`` / Esc / q dismiss."""
+
+    BINDINGS = [
+        Binding("question_mark", "close", "close", key_display="?"),
+        Binding("escape", "close", "close"),
+        Binding("q", "close", "close"),
+    ]
+
+    CSS = """
+    HelpScreen { align: center middle; }
+    #help { width: 76; height: 80%; max-height: 34; border: round $primary; background: $surface; }
+    #help_title { padding: 0 2; text-style: bold; }
+    #help_body { height: 1fr; padding: 1 2; }
+    """
+
+    # (section, [(keys, what), ...]); alternatives are "/"-joined so the keys
+    # flatten back to the individual bindings documented (see the TUI test)
+    SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
+        ("Cells", [
+            ("j/k", "move the cell selection"),
+            ("gg/G", "first / last cell"),
+            ("h/l", "cycle detail tabs (SQL / Data / Config / Log)"),
+            ("enter", "dive into the Data sheet"),
+            ("/", "search cell names"),
+            ("r/R", "run cell / run all (arms watch reruns)"),
+            ("a/A", "toggle autorun for the cell / globally"),
+            ("t", "SQL raw ↔ rendered"),
+            ("S", "catalog browser"),
+            ("V", "open the cell's output in VisiData"),
+            ("o", "open / switch notebook"),
+        ]),
+        ("Data sheet", [
+            ("j/k/h/l", "move the cursor"),
+            ("gg/G", "top / bottom row"),
+            ("ctrl+u/ctrl+d", "page up / down"),
+            ("[/]", "sort ascending / descending"),
+            ("-", "hide the current column"),
+            ("s/gs", "select row / select all"),
+            ("f", "filter rows by regex (live; Enter commits)"),
+            ("n/N", "next / previous search match"),
+            ("F", "frequency table of the column"),
+            ("I", "describe (summary stats)"),
+            ("y", "yank cell / selected column to clipboard"),
+            ("q", "pop the sheet (back a level)"),
+        ]),
+        ("Catalog (S)", [
+            ("enter", "drill: context → dataset → table → fields"),
+            ("ctrl+r", "refetch the current level"),
+            ("q", "pop back a level"),
+        ]),
+        ("General", [
+            ("?", "this help"),
+            ("q", "pop / quit"),
+        ]),
+    ]
+
+    def compose(self) -> ComposeResult:
+        from rich.console import Group
+        from rich.table import Table
+        from rich.text import Text
+
+        blocks: list[Any] = []
+        for i, (title, rows) in enumerate(self.SECTIONS):
+            if i:
+                blocks.append(Text())
+            blocks.append(Text(title, style="bold"))
+            grid = Table.grid(padding=(0, 3))
+            grid.add_column(justify="right", style="cyan", no_wrap=True)
+            grid.add_column(overflow="fold")
+            for keys, what in rows:  # Text() so "[/]" et al. aren't read as markup
+                grid.add_row(Text(keys), Text(what))
+            blocks.append(grid)
+        with Vertical(id="help"):
+            yield Static("qsql keys — ? or Esc to close", id="help_title")
+            with VerticalScroll(id="help_body"):
+                yield Static(Group(*blocks))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class QsqlApp(App):
     TITLE = "qsql"
 
@@ -104,6 +189,9 @@ class QsqlApp(App):
     #detail { height: 1fr; border: solid $secondary; }
     #search { dock: bottom; display: none; }
     #sql_view, #config_view { padding: 1; }
+    /* too short for both sections: drop the detail tabs, let the cell list fill */
+    #body.-compact #detail { display: none; }
+    #body.-compact #cells { height: 1fr; max-height: 100%; }
     """
 
     BINDINGS = [
@@ -119,6 +207,7 @@ class QsqlApp(App):
         Binding("V", "visidata", "vd"),
         Binding("o", "open_notebook", "open"),
         Binding("slash", "search", "search", key_display="/"),
+        Binding("question_mark", "help", "help", key_display="?"),
         Binding("ctrl+r", "refetch", "refetch", show=False),
         Binding("ctrl+d", "page(1)", "page down", show=False),
         Binding("ctrl+u", "page(-1)", "page up", show=False),
@@ -161,7 +250,7 @@ class QsqlApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Vertical():
+        with Vertical(id="body"):
             yield DataTable(id="cells", cursor_type="row")
             with TabbedContent(id="detail"):
                 with TabPane("SQL", id="tab_sql"):
@@ -244,6 +333,21 @@ class QsqlApp(App):
 
     def action_open_notebook(self) -> None:
         self._show_picker(startup=False)
+
+    def action_help(self) -> None:
+        if not isinstance(self.screen, HelpScreen):
+            self.push_screen(HelpScreen())
+
+    # rows of terminal below which the detail tabs are dropped and the cell
+    # list fills the screen (header + a usable detail pane don't both fit)
+    COMPACT_HEIGHT = 12
+
+    def on_resize(self, event: events.Resize) -> None:
+        try:
+            body = self.query_one("#body", Vertical)
+        except NoMatches:
+            return  # resize before the body mounted; on_mount lays out fresh
+        body.set_class(event.size.height < self.COMPACT_HEIGHT, "-compact")
 
     def on_unmount(self) -> None:
         self.session.close()

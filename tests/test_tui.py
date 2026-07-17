@@ -573,3 +573,53 @@ async def test_run_all_populates_results_and_dive(notebook) -> None:
         assert len(app.sheet_stack) == 1
         await pilot.press("q")  # leave data mode
         assert app.mode == "cells"
+
+
+async def test_question_mark_opens_help_overlay_covering_all_key_layers(notebook) -> None:
+    # the help overlay must document keys from every layer, including the
+    # vim/sheet keys that live only in on_key and appear in no footer binding
+    from qsql_demo.tui import HelpScreen
+
+    documented = {
+        key.strip()
+        for _, rows in HelpScreen.SECTIONS
+        for keys, _ in rows
+        for key in keys.split("/")
+    }
+    # footer bindings and on_key-only keys alike are covered
+    for key in ("r", "R", "S", "y", "f", "gg", "[", "]", "-", "n", "?"):
+        assert key in documented, f"{key!r} missing from the help overlay"
+
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("question_mark")  # toggles closed
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")  # escape also closes
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+
+
+async def test_short_terminal_collapses_to_cells_only(notebook) -> None:
+    # when the terminal gets too short, hide the detail tabs so only the top
+    # cell-list section shows; restore it when there's room again
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        detail = app.query_one("#detail")
+        cells = app.query_one("#cells")
+        assert detail.display  # roomy: both sections visible
+        await pilot.resize_terminal(100, 8)  # cramped
+        await pilot.pause()
+        assert not detail.display  # only the cell list remains
+        assert cells.display
+        await pilot.resize_terminal(100, 40)  # room again
+        await pilot.pause()
+        assert detail.display  # restored
