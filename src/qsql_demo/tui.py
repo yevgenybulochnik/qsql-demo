@@ -652,7 +652,7 @@ class QsqlApp(App):
 
     def action_page(self, direction: int) -> None:
         if self.mode == "data":
-            self._mutate_sheet(lambda s: s.move(direction * 20, 0))
+            self._mutate_sheet(lambda s: self._reconcile_to_viewport(s).move(direction * 20, 0))
         else:
             self.query_one("#cells", DataTable).move_cursor(
                 row=(self.query_one("#cells", DataTable).cursor_row or 0) + direction * 10
@@ -727,6 +727,21 @@ class QsqlApp(App):
         idx = self.TAB_ORDER.index(tabs.active) if tabs.active in self.TAB_ORDER else 0
         tabs.active = self.TAB_ORDER[(idx + delta) % len(self.TAB_ORDER)]
 
+    def _reconcile_to_viewport(self, sheet: Sheet) -> Sheet:
+        """Snap the cursor row into the data table's visible window. The mouse
+        wheel scrolls the viewport but not the Sheet cursor, so without this a
+        keyboard move would resume from the stale (often top) cursor and snap
+        the view away from what the user is looking at. A no-op during normal
+        keyboard navigation, where the cursor is always already on screen."""
+        table = self.query_one("#data", DataTable)
+        height = table.scrollable_content_region.height
+        if not height:
+            return sheet
+        first = int(table.scroll_y)
+        last = min(first + height - 1, sheet.frame.height - 1)
+        row = min(max(sheet.cursor[0], first), last)
+        return sheet if row == sheet.cursor[0] else sheet.move(row - sheet.cursor[0], 0)
+
     def _move(self, d_row: int = 0, d_col: int = 0, top: bool = False, bottom: bool = False) -> None:
         if self.mode == "data":
             if top:
@@ -734,7 +749,7 @@ class QsqlApp(App):
             elif bottom:
                 self._mutate_sheet(lambda s: s.bottom())
             else:
-                self._mutate_sheet(lambda s: s.move(d_row, d_col))
+                self._mutate_sheet(lambda s: self._reconcile_to_viewport(s).move(d_row, d_col))
             return
         if d_col:
             self._cycle_tab(d_col)
