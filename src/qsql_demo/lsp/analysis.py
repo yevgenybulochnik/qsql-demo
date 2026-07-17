@@ -1,0 +1,210 @@
+"""Editor-agnostic analysis: diagnostics (linting) and completions.
+
+Both reuse the compiler and catalog directly, so no LSP transport is needed to
+test them. Positions are 0-indexed (line, character) per the LSP convention.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ErrorLevel, ParseError
+
+from ..compiler import compile_text
+from ..errors import ConfigErrorGroup, CycleError, ParseError as QsqlParseError, QsqlError
+from .mask import Ref, Source, mask_jinja
+from .schema import SchemaCache, columns_for
+
+# qsql engine names line up with sqlglot dialect names
+_DIALECT = {"duckdb": "duckdb", "postgres": "postgres", "sqlite": "sqlite", "bigquery": "bigquery"}
+
+_KEYWORDS = [
+    "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET",
+    "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "ON", "USING",
+    "AS", "AND", "OR", "NOT", "IN", "IS NULL", "IS NOT NULL", "CASE", "WHEN", "THEN",
+    "ELSE", "END", "DISTINCT", "UNION", "UNION ALL", "WITH", "OVER", "PARTITION BY",
+]
+
+
+@dataclass
+class Diagnostic:
+    line: int
+    character: int
+    end_line: int
+    end_character: int
+    message: str
+    severity: str = "error"  # "error" | "warning"
+    source: str = "qsql"
+
+
+@dataclass
+class Completion:
+    label: str
+    kind: str  # "field" | "reference" | "keyword"
+    detail: str = ""
+
+
+@dataclass
+class Analyzer:
+    """Holds the schema cache across requests (remote introspection is slow)."""
+
+    cache: SchemaCache = field(default_factory=SchemaCache)
+
+    # ---------- diagnostics ----------
+
+    def diagnostics(self, text: str, root: Path | str = ".") -> list[Diagnostic]:
+        try:
+            project = compile_text(text, Path(root))
+        except ConfigErrorGroup as group:
+            return [_line_diag(text, e.line, e.message) for e in group.errors]
+        except QsqlParseError as exc:
+            return [_line_diag(text, _line_in(str(exc)), str(exc))]
+        except (CycleError, QsqlError) as exc:
+            return [_line_diag(text, 1, str(exc))]
+        diags: list[Diagnostic] = []
+        for cell in project.cells.values():
+            diags.extend(_syntax_diagnostics(cell))
+        return diags
+
+    # ---------- completions ----------
+
+    def completions(
+        self, text: str, root: Path | str, line: int, character: int
+    ) -> list[Completion]:
+        try:
+            project = compile_text(text, Path(root))
+        except QsqlError:
+            project = None  # can't scope-resolve, but keywords still help
+        lines = text.splitlines()
+        prefix = lines[line][:character] if 0 <= line < len(lines) else ""
+
+        if project is not None:
+            in_ref = re.search(r"\b(ref|source)\(\s*['\"]?\w*$", prefix)
+            if in_ref:
+                return [
+                    Completion(name, "reference", f"cell · {project.cells[name].engine}")
+                    for name in project.order
+                ]
+
+        items = [Completion(k, "keyword") for k in _KEYWORDS]
+        cell = _cell_at(project, line + 1) if project is not None else None
+        if cell is None:
+            return items
+
+        scope = _resolve_scope(project, cell)
+        alias_m = re.search(r"([A-Za-z_]\w*)\.\w*$", prefix)
+        alias = alias_m.group(1).lower() if alias_m else None
+        relations = [scope[alias]] if alias and alias in scope else list(scope.values())
+
+        seen: set[str] = set()
+        cols: list[Completion] = []
+        for rel in relations:
+            for name, type_ in columns_for(project, cell, rel, self.cache):
+                if name not in seen:
+                    seen.add(name)
+                    cols.append(Completion(name, "field", type_))
+        return cols + items
+
+    # ---------- navigation (go-to-def / outline) ----------
+
+    def definition(
+        self, text: str, root: Path | str, line: int, character: int
+    ) -> tuple[int, int] | None:
+        """`ref('x')` under the cursor -> the (line, 0) where cell x is defined."""
+        try:
+            project = compile_text(text, Path(root))
+        except QsqlError:
+            return None
+        lines = text.splitlines()
+        if not (0 <= line < len(lines)):
+            return None
+        for m in re.finditer(r"\bref\(\s*['\"]([^'\"]+)['\"]", lines[line]):
+            if m.start() <= character <= m.end():
+                cell = project.cells.get(m.group(1))
+                if cell is not None:
+                    return (cell.line - 1, 0)
+        return None
+
+    def document_symbols(self, text: str, root: Path | str) -> list[tuple[str, int, int, str]]:
+        """(cell name, start_line, end_line, engine) for the outline, 0-indexed."""
+        try:
+            project = compile_text(text, Path(root))
+        except QsqlError:
+            return []
+        return [
+            (c.name, c.line - 1, max(c.line_end - 1, c.line - 1), c.engine)
+            for c in project.cells.values()
+        ]
+
+
+# ---------- helpers ----------
+
+
+def _line_in(message: str) -> int:
+    m = re.search(r"line (\d+)", message)
+    return int(m.group(1)) if m else 1
+
+
+def _line_diag(text: str, line1: int, message: str, severity: str = "error") -> Diagnostic:
+    """A diagnostic spanning a whole 1-indexed source line."""
+    lines = text.splitlines()
+    row = max(line1 - 1, 0)
+    width = len(lines[row]) if row < len(lines) else 0
+    return Diagnostic(row, 0, row, width, message, severity)
+
+
+def _syntax_diagnostics(cell: Any) -> list[Diagnostic]:
+    dialect = _DIALECT.get(cell.engine)
+    if dialect is None or "{%" in cell.source:
+        return []  # control-flow Jinja can't be masked into valid SQL (v1 limit)
+    masked, _ = mask_jinja(cell.source)
+    try:
+        sqlglot.parse(masked, dialect=dialect)
+    except ParseError as exc:
+        out: list[Diagnostic] = []
+        for err in exc.errors:
+            # sqlglot line/col are 1-indexed within cell.source, whose line 1
+            # is file line cell.line
+            row = cell.line + int(err.get("line", 1)) - 2
+            col = max(int(err.get("col", 1)) - 1, 0)
+            out.append(
+                Diagnostic(row, col, row, col + 1, err["description"], "error", "sqlglot")
+            )
+        return out
+    return []
+
+
+def _cell_at(project: Any, line1: int) -> Any | None:
+    for cell in project.cells.values():
+        if cell.line <= line1 <= cell.line_end:
+            return cell
+    return None
+
+
+def _resolve_scope(project: Any, cell: Any) -> dict[str, Any]:
+    """alias/name (lowercased) -> relation: a mask Ref/Source tag for a
+    ``{{ ref/source }}`` placeholder, else the (qualified) table-name string."""
+    dialect = _DIALECT.get(cell.engine)
+    masked, spans = mask_jinja(cell.source)
+    by_placeholder = {s.name: s.tag for s in spans if s.name}
+    try:
+        tree = sqlglot.parse_one(masked, dialect=dialect, error_level=ErrorLevel.IGNORE)
+    except Exception:
+        return {}
+    if tree is None:
+        return {}
+    scope: dict[str, Any] = {}
+    for table in tree.find_all(exp.Table):
+        key = (table.alias_or_name or "").lower()
+        if not key:
+            continue
+        if table.name in by_placeholder:  # a {{ ref/source }} placeholder
+            scope[key] = by_placeholder[table.name]
+        else:  # engine-native table, keep any schema qualifier
+            scope[key] = f"{table.db}.{table.name}" if table.db else table.name
+    return scope

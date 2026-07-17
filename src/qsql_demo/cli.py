@@ -236,3 +236,20 @@ def tui(
     from .tui import QsqlApp
 
     QsqlApp(path=file, overrides=gather_overrides(list(set_ or []))).run()
+
+
+@app.command()
+def lsp() -> None:
+    """Run the qsql language server over stdio (linting + column completion).
+
+    Point your editor's LSP client at ``qsql lsp`` for a ``.qsql`` file — see
+    editors/nvim/qsql.lua for a Neovim setup."""
+    try:
+        from .lsp.server import start_io
+    except ImportError:
+        typer.secho(
+            "the language server needs the 'lsp' extra: pip install 'qsql-demo[lsp]'",
+            fg="red",
+        )
+        raise typer.Exit(1)
+    start_io()
