@@ -5,12 +5,12 @@ import duckdb
 import polars as pl
 import pytest
 
-from qsql_demo.config import resolve_cell
-from qsql_demo.errors import ExecutorError
-from qsql_demo.executors.bigquery_exec import BigQueryExecutor
-from qsql_demo.executors.postgres_exec import PostgresExecutor
-from qsql_demo.models import RenderedCell, RunContext
-from qsql_demo.registry import EXECUTORS
+from quicksql.config import resolve_cell
+from quicksql.errors import ExecutorError
+from quicksql.executors.bigquery_exec import BigQueryExecutor
+from quicksql.executors.postgres_exec import PostgresExecutor
+from quicksql.models import RenderedCell, RunContext
+from quicksql.registry import EXECUTORS
 
 
 def _cell(name: str, sql: str, cell_raw: dict | None = None) -> RenderedCell:
@@ -55,7 +55,7 @@ def test_sqlite_executor_bad_sql_raises(ctx) -> None:
 def test_bigquery_same_context_cells_share_a_session(tmp_path, monkeypatch) -> None:
     from types import SimpleNamespace
 
-    from qsql_demo.compiler import compile_text
+    from quicksql.compiler import compile_text
 
     calls: list[tuple[str, object]] = []
     events: list[str] = []  # submit/wait interleaving: sessions forbid concurrency
@@ -181,10 +181,10 @@ def test_postgres_executor_registers_result(ctx, fake_pg) -> None:
 
 
 def test_postgres_executor_string_shorthand_and_env_dsn(monkeypatch) -> None:
-    monkeypatch.setenv("PG_DSN", "postgresql://qsql@localhost/qsql")
+    monkeypatch.setenv("PG_DSN", "postgresql://quicksql@localhost/quicksql")
     cfg = resolve_cell({}, {"input": {"postgres": "$PG_DSN"}})
     key = EXECUTORS.get("postgres").context_key(cfg)
-    assert key == "postgres:postgresql://qsql@localhost/qsql"
+    assert key == "postgres:postgresql://quicksql@localhost/quicksql"
 
 
 def test_postgres_executor_missing_dsn_raises(ctx, fake_pg) -> None:
@@ -200,7 +200,7 @@ def test_postgres_executor_wraps_driver_errors(ctx, fake_pg) -> None:
 
 
 def test_postgres_same_context_cells_share_a_connection(tmp_path, fake_pg) -> None:
-    from qsql_demo.compiler import compile_text
+    from quicksql.compiler import compile_text
 
     project = compile_text(
         "/*@ input: { postgres: { dsn: 'postgresql://x' } } */\n"

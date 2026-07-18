@@ -1,9 +1,9 @@
 ---
 name: verify
-description: Drive the qsql TUI end-to-end in tmux to verify changes at the terminal surface.
+description: Drive the quicksql TUI end-to-end in tmux to verify changes at the terminal surface.
 ---
 
-# Verifying qsql changes
+# Verifying quicksql changes
 
 The runtime surface is the TUI (and the CLI). Drive it in an isolated tmux:
 
@@ -14,7 +14,7 @@ cat > $SCRATCH/base.qsql <<'EOF'
 SELECT 1 AS id, {'name': 'signup', 'params': [{'key': 'plan', 'value': 9}]} AS event;
 EOF
 tmux -L qsqlverify new-session -d -x 110 -y 30 -c $SCRATCH \
-  "uv run --project <repo> qsql tui $SCRATCH/base.qsql"
+  "uv run --project <repo> quicksql tui $SCRATCH/base.qsql"
 sleep 5   # app boot takes a few seconds under uv
 tmux -L qsqlverify send-keys R      # run all (arms autorun)
 tmux -L qsqlverify capture-pane -p  # evidence

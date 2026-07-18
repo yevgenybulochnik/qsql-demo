@@ -1,7 +1,7 @@
 import pytest
 
-from qsql_demo.errors import ParseError
-from qsql_demo.parser import body_hash, parse_text
+from quicksql.errors import ParseError
+from quicksql.parser import body_hash, parse_text
 
 SAMPLE = """\
 -- @engine: duckdb

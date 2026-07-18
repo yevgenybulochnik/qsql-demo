@@ -1,7 +1,7 @@
 -- Example pipeline: multi-sink, vars, autorun, run-time overrides. Offline-runnable:
---   uv run qsql run examples/pipeline.qsql
---   uv run qsql run examples/pipeline.qsql --set vars.top_n=2
---   uv run qsql tui examples/pipeline.qsql
+--   uv run quicksql run examples/pipeline.qsql
+--   uv run quicksql run examples/pipeline.qsql --set vars.top_n=2
+--   uv run quicksql tui examples/pipeline.qsql
 
 -- @engine: duckdb
 -- @output: { type: parquet, dir: data/ }

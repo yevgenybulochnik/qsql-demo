@@ -3,10 +3,10 @@ import sqlite3
 import polars as pl
 import pytest
 
-from qsql_demo.compiler import compile_text
-from qsql_demo.plugins.base import Plugin
-from qsql_demo.registry import plugin
-from qsql_demo.runner import RunSession, run_project
+from quicksql.compiler import compile_text
+from quicksql.plugins.base import Plugin
+from quicksql.registry import plugin
+from quicksql.runner import RunSession, run_project
 
 
 def test_run_lands_parquet_and_previews(tmp_path) -> None:
@@ -125,7 +125,7 @@ def test_session_reconnects_when_conduit_target_changes(tmp_path) -> None:
 
 
 def test_session_caches_extension_loads(tmp_path, monkeypatch) -> None:
-    import qsql_demo.runner as runner_mod
+    import quicksql.runner as runner_mod
 
     loads: list[str] = []
     original = runner_mod._load_extension
@@ -305,7 +305,7 @@ def test_emit_sql_plugin_writes_rendered_sql(tmp_path) -> None:
 
 
 def test_on_event_streams_the_cell_lifecycle_in_order(tmp_path) -> None:
-    from qsql_demo.models import RunEvent
+    from quicksql.models import RunEvent
 
     project = compile_text(
         "-- @cell users\nSELECT * FROM range(3) t(user_id);\n"
@@ -393,7 +393,7 @@ def test_plugin_lifecycle_failures_surface_as_notes_before_run_finished(tmp_path
 
 
 def test_run_event_line_renders_each_kind() -> None:
-    from qsql_demo.models import RunEvent, RunResult
+    from quicksql.models import RunEvent, RunResult
 
     ok = RunResult(cell="a", ok=True, rows=3, elapsed=0.012, target="data/a.parquet")
     assert RunEvent("cell_finished", "a", result=ok).line() == (

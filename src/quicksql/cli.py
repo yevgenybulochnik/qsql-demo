@@ -1,4 +1,4 @@
-"""The qsql CLI: init / run / watch / tui / list / show / compile."""
+"""The quicksql CLI: init / run / watch / tui / list / show / compile."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,
     invoke_without_command=True,
-    help="qsql — a notebook for SQL: one file, named cells, comment directives.",
+    help="quicksql — a notebook for SQL: one file, named cells, comment directives.",
 )
 
 FILE_ARG = typer.Argument(Path("base.qsql"), help="The .qsql/.sql notebook file")
@@ -50,7 +50,7 @@ def _init(file: Path) -> None:
     except FileExistsError:
         typer.secho(f"refusing to overwrite existing {file}", fg="red")
         raise typer.Exit(1)
-    typer.echo(f"scaffolded {file} — try: qsql run {file}")
+    typer.echo(f"scaffolded {file} — try: quicksql run {file}")
 
 
 def _load_plugin_module(spec: str) -> None:
@@ -72,7 +72,7 @@ def _load_plugin_module(spec: str) -> None:
 def _project(file: Path, sets: list[str] | None, plugins: list[str] | None) -> Project:
     load_builtins()
     try:
-        rc = file.parent / "qsqlrc.py"
+        rc = file.parent / "quicksqlrc.py"
         if rc.exists():
             _load_plugin_module(str(rc))
         for spec in plugins or []:
@@ -241,7 +241,7 @@ def tui(
         _project(file, set_, plugins)  # load plugins + fail fast on compile errors
     else:  # the TUI opens its notebook picker; plugins still need loading
         load_builtins()
-        rc = file.parent / "qsqlrc.py"
+        rc = file.parent / "quicksqlrc.py"
         if rc.exists():
             _load_plugin_module(str(rc))
         for spec in plugins or []:
@@ -253,15 +253,15 @@ def tui(
 
 @app.command()
 def lsp() -> None:
-    """Run the qsql language server over stdio (linting + column completion).
+    """Run the quicksql language server over stdio (linting + column completion).
 
-    Point your editor's LSP client at ``qsql lsp`` for a ``.qsql`` file — see
+    Point your editor's LSP client at ``quicksql lsp`` for a ``.qsql`` file — see
     editors/nvim/qsql.lua for a Neovim setup."""
     try:
         from .lsp.server import start_io
     except ImportError:
         typer.secho(
-            "the language server needs the 'lsp' extra: pip install 'qsql-demo[lsp]'",
+            "the language server needs the 'lsp' extra: pip install 'quicksql[lsp]'",
             fg="red",
         )
         raise typer.Exit(1)

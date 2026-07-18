@@ -20,7 +20,7 @@ from ..errors import ConfigErrorGroup, CycleError, ParseError as QsqlParseError,
 from .mask import Ref, Source, mask_jinja
 from .schema import SchemaCache, columns_for
 
-# qsql engine names line up with sqlglot dialect names
+# quicksql engine names line up with sqlglot dialect names
 _DIALECT = {"duckdb": "duckdb", "postgres": "postgres", "sqlite": "sqlite", "bigquery": "bigquery"}
 
 _KEYWORDS = [
@@ -39,7 +39,7 @@ class Diagnostic:
     end_character: int
     message: str
     severity: str = "error"  # "error" | "warning"
-    source: str = "qsql"
+    source: str = "quicksql"
 
 
 @dataclass

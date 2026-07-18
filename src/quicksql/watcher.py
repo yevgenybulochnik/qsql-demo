@@ -1,4 +1,4 @@
-"""Watch a qsql file: recompile on save, rerun changed cells + their dependents.
+"""Watch a quicksql file: recompile on save, rerun changed cells + their dependents.
 
 Change detection hashes SQL bodies only, so config-only edits don't trigger
 reruns (known limitation). Cells with autorun:false are skipped.

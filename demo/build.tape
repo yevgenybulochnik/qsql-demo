@@ -1,4 +1,4 @@
-# qsql "build a cell live" GIF — regenerate with:  vhs demo/build.tape
+# quicksql "build a cell live" GIF — regenerate with:  vhs demo/build.tape
 #
 # The notebook starts with two Postgres cells; the cross-engine DuckDB cell is
 # typed on camera. A newly written cell has no previous hash, so watch mode
@@ -7,7 +7,7 @@
 # Prereqs: docker compose up -d --wait; uv sync --extra postgres --extra visidata;
 #          demo data seeded (see demo/README.md).
 
-Output "demo/qsql-build.gif"
+Output "demo/quicksql-build.gif"
 
 Require tmux
 Require nvim
@@ -25,7 +25,7 @@ Type "cd demo" Enter
 Type "clear" Enter
 Show
 
-# --- the layout: nvim | qsql tui --------------------------------------------
+# --- the layout: nvim | quicksql tui --------------------------------------------
 Type "./scene.sh build.qsql" Sleep 700ms Enter
 Sleep 8s
 

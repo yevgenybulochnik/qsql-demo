@@ -1,6 +1,6 @@
-# qsql-demo
+# quicksql
 
-qsql is a CLI "notebook for SQL": one `.qsql`/`.sql` file of valid SQL, split into named
+quicksql is a CLI "notebook for SQL": one `.qsql`/`.sql` file of valid SQL, split into named
 cells by `-- @cell <name>`. Config lives in `@`-comment YAML directives — line form
 `-- @key: value`, block form `/*@ ... */` — with a global header (everything before the
 first `@cell`) inherited by every cell.
@@ -33,42 +33,42 @@ first `@cell`) inherited by every cell.
   `collect_edges`/`sink_config` let directives own their behavior (core defaults:
   duckdb/parquet/rerun); `after_compile` may raise to reject a compile;
   `before_run`/`after_run` are contained notifications.
-  `qsql explain` prints the effective chain/hook order. `config.build_models`
+  `quicksql explain` prints the effective chain/hook order. `config.build_models`
   composes all plugin Configs into GlobalConfig/CellConfig via `create_model`.
-- **Config resolution:** global → cell → run overrides (`--set k.v=x`, `QSQL_K__V=x`),
+- **Config resolution:** global → cell → run overrides (`--set k.v=x`, `QUICKSQL_K__V=x`),
   per-field merge strategy (OVERRIDE / DEEP / EXTEND). Config values are literal; Jinja
   applies to SQL bodies only.
 - **Watch/TUI are reflect-only.** The file is edited elsewhere; change detection hashes
   SQL bodies only, so config-only edits don't trigger reruns (known limitation; the
   watch/TUI log flags them as `config changed (no rerun)` via
   `watcher.config_only_changes`).
-  Third-party plugins load via `--plugins mod.or.path.py` or a `qsqlrc.py` next to the file.
+  Third-party plugins load via `--plugins mod.or.path.py` or a `quicksqlrc.py` next to the file.
 
 ## Commands
 
 - `uv run pytest` — markers `network` / `bigquery` / `postgres` are deselected by default.
-  `docker compose up -d --wait` stands up Postgres (databases: `qsql` for stress/manual
-  data, `qsql_test` for pytest, `qsql_claims` for the synthetic-claims smoke test —
+  `docker compose up -d --wait` stands up Postgres (databases: `quicksql` for stress/manual
+  data, `quicksql_test` for pytest, `quicksql_claims` for the synthetic-claims smoke test —
   seed per `examples/claims_seed.sql`, drive with `examples/claims.qsql`), then
   `uv run --extra postgres pytest -m postgres` runs
   the integration tests; they skip when the server is down. Override the DSN with
-  `QSQL_TEST_PG_DSN`. Everything except the cloud-gated tests:
+  `QUICKSQL_TEST_PG_DSN`. Everything except the cloud-gated tests:
   `uv run --extra postgres pytest -m "not (network or bigquery)"` — an explicit `-m`
   overrides the default deselection.
-- `uv run qsql` (bare = init) | `init` | `run` | `watch` | `tui` | `list` | `show <cell>` |
-  `compile` — default file `base.qsql`; `--set key.path=value` repeatable. `qsql tui`
+- `uv run quicksql` (bare = init) | `init` | `run` | `watch` | `tui` | `list` | `show <cell>` |
+  `compile` — default file `base.qsql`; `--set key.path=value` repeatable. `quicksql tui`
   with a missing file opens a notebook picker: existing .qsql/.qsql.sql files plus
-  starter templates (builtin `base` + user templates from `~/.qsql/templates/*.qsql`);
+  starter templates (builtin `base` + user templates from `~/.quicksql/templates/*.qsql`);
   `o` in the TUI switches notebooks.
 
-## Architecture map (`src/qsql_demo/`)
+## Architecture map (`src/quicksql/`)
 
 - `parser.py` — text → RawBlocks (directive YAML + SQL body + body hash)
 - `registry.py` — registries + decorators; field→plugin map with collision guard
 - `plugins/` — `base.py` (Plugin, qfield), `builtin.py` (the directive vocabulary),
   `emit_sql.py` (behavior-plugin demonstrator)
 - `config.py` — model composition, scope checks, layer merging, engine/sink resolution
-- `overrides.py` — `--set` / `QSQL_*` parsing
+- `overrides.py` — `--set` / `QUICKSQL_*` parsing
 - `render.py` — Jinja on SQL bodies; ref/source/var/env; records edges + extensions
 - `sources.py` — file reader registry (csv/parquet/json/excel)
 - `graph.py` — topo sort, cycle detection, downstream sets

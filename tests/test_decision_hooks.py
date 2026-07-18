@@ -2,11 +2,11 @@
 
 import pytest
 
-from qsql_demo.compiler import compile_file, compile_text
-from qsql_demo.errors import ConfigError
-from qsql_demo.plugins.base import Plugin
-from qsql_demo.registry import PLUGINS, plugin
-from qsql_demo.watcher import hashes_of, plan_rerun
+from quicksql.compiler import compile_file, compile_text
+from quicksql.errors import ConfigError
+from quicksql.plugins.base import Plugin
+from quicksql.registry import PLUGINS, plugin
+from quicksql.watcher import hashes_of, plan_rerun
 
 
 def _drop(name: str) -> None:
@@ -28,7 +28,7 @@ def test_first_result_returns_highest_priority_answer() -> None:
         def resolve_engine(self, config):
             return "bigquery"
 
-    from qsql_demo.config import resolve_cell, resolve_engine
+    from quicksql.config import resolve_cell, resolve_engine
 
     assert resolve_engine(resolve_cell({}, {})) == "sqlite"
 
@@ -79,7 +79,7 @@ def test_schema_directive_reaches_sink_config(tmp_path) -> None:
 
 
 def test_extensions_plugin_loads_via_before_execute(tmp_path, monkeypatch) -> None:
-    import qsql_demo.runner as runner_mod
+    import quicksql.runner as runner_mod
 
     loads: list[str] = []
     original = runner_mod._load_extension

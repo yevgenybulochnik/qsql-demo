@@ -1,5 +1,5 @@
 class QsqlError(Exception):
-    """Base class for all qsql errors."""
+    """Base class for all quicksql errors."""
 
 
 class ParseError(QsqlError):

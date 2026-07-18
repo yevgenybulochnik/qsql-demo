@@ -1,4 +1,4 @@
-"""Run-time config overrides: repeatable --set key.path=value and QSQL_* env vars.
+"""Run-time config overrides: repeatable --set key.path=value and QUICKSQL_* env vars.
 
 Highest-priority config layer; CLI --set beats environment. Values are parsed
 as YAML scalars so ``true``/``3``/plain strings do the right thing.
@@ -13,7 +13,7 @@ import yaml
 
 from .errors import ConfigError
 
-ENV_PREFIX = "QSQL_"
+ENV_PREFIX = "QUICKSQL_"
 
 
 def _assign(tree: dict[str, Any], dotted: str, value: Any) -> None:

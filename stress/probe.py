@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 
-TARGET = "qsql-demo:stress"
+TARGET = "quicksql:stress"
 
 
 def capture() -> str:

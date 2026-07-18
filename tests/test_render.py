@@ -1,8 +1,8 @@
 import pytest
 
-from qsql_demo.compiler import compile_text
-from qsql_demo.errors import ConfigError
-from qsql_demo.render import RenderContext
+from quicksql.compiler import compile_text
+from quicksql.errors import ConfigError
+from quicksql.render import RenderContext
 
 
 def test_render_context_capability_verbs(tmp_path) -> None:
@@ -89,10 +89,10 @@ def test_inline_path_source(tmp_path) -> None:
 
 
 def test_var_and_env(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("QSQL_TEST_TOKEN", "sekret")
+    monkeypatch.setenv("QUICKSQL_TEST_TOKEN", "sekret")
     project = compile_text(
         "-- @vars: { data_dir: ./seeds }\n"
-        "-- @cell a\nSELECT '{{ var(\"data_dir\") }}' AS d, '{{ env(\"QSQL_TEST_TOKEN\") }}' AS t,"
+        "-- @cell a\nSELECT '{{ var(\"data_dir\") }}' AS d, '{{ env(\"QUICKSQL_TEST_TOKEN\") }}' AS t,"
         " {{ var('missing', 42) }} AS fallback;",
         root=tmp_path,
     )

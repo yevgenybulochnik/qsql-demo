@@ -1,14 +1,14 @@
-"""The starter file `qsql init` writes: runs offline, demonstrates the basics."""
+"""The starter file `quicksql init` writes: runs offline, demonstrates the basics."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 BASE_SQL = """\
--- qsql starter — one SQL file, cells split by `-- @cell`, config in @-comments.
--- Run it:      qsql run
--- Inspect it:  qsql list / qsql show <cell> / qsql tui
--- Watch it:    qsql watch   (re-runs changed cells + their dependents on save)
+-- quicksql starter — one SQL file, cells split by `-- @cell`, config in @-comments.
+-- Run it:      quicksql run
+-- Inspect it:  quicksql list / quicksql show <cell> / quicksql tui
+-- Watch it:    quicksql watch   (re-runs changed cells + their dependents on save)
 
 -- @engine: duckdb
 -- @output: { type: parquet, dir: data/ }
@@ -41,7 +41,7 @@ JOIN {{ ref('events') }} e USING (user_id)
 --   * point a cell at another engine:   /*@ input: { sqlite: legacy.db } */
 --   * land a cell somewhere else:       -- @output: { type: duckdb, path: warehouse.db }
 --   * read files:                       SELECT * FROM {{ source('seeds/users.csv') }}
---   * override at run time:             qsql run --set output.type=duckdb
+--   * override at run time:             quicksql run --set output.type=duckdb
 """
 
 
@@ -50,11 +50,11 @@ TEMPLATES: dict[str, str] = {"base": BASE_SQL}
 
 
 def user_templates_dir() -> Path:
-    return Path.home() / ".qsql" / "templates"
+    return Path.home() / ".quicksql" / "templates"
 
 
 def user_templates() -> dict[str, Path]:
-    """User-defined starting templates: ~/.qsql/templates/*.qsql[.sql],
+    """User-defined starting templates: ~/.quicksql/templates/*.qsql[.sql],
     named by file stem. Missing directory just means none."""
     directory = user_templates_dir()
     if not directory.is_dir():

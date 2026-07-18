@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-# qsql outputs
+# quicksql outputs
 data/
 warehouse.db
 stress/stress.db

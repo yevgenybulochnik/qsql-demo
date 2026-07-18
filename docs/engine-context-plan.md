@@ -52,7 +52,7 @@ attribution stay per-cell).
   session, a selected cell's same-context upstream closure must re-materialize first:
   the session tracks which temps exist and the runner expands the exact-set selection
   through missing same-context upstreams.
-- **Observability** — `qsql list`/`explain` show each cell's context key; the run chain
+- **Observability** — `quicksql list`/`explain` show each cell's context key; the run chain
   is unchanged (cells stay the execution unit).
 
 ## Phases (each ends green; test-first, conventional commits)

@@ -1,17 +1,17 @@
 import pytest
 from pydantic import BaseModel, field_validator
 
-from qsql_demo.config import (
+from quicksql.config import (
     build_models,
     resolve_cell,
     resolve_engine,
     resolve_global,
     resolve_sink_type,
 )
-from qsql_demo.errors import ConfigError
-from qsql_demo.models import Merge, Scope
-from qsql_demo.plugins.base import Plugin, qfield
-from qsql_demo.registry import plugin
+from quicksql.errors import ConfigError
+from quicksql.models import Merge, Scope
+from quicksql.plugins.base import Plugin, qfield
+from quicksql.registry import plugin
 
 
 def test_build_models_fields_and_defaults() -> None:

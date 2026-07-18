@@ -1,4 +1,4 @@
-"""qsql language server — analysis layer (no editor transport needed)."""
+"""quicksql language server — analysis layer (no editor transport needed)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import pytest
 # the lsp extra (sqlglot + pygls) is optional; skip this whole module without it
 pytest.importorskip("sqlglot", reason="install the 'lsp' extra to run LSP tests")
 
-from qsql_demo.compiler import compile_file
-from qsql_demo.lsp.mask import Opaque, Ref, Source, mask_jinja
+from quicksql.compiler import compile_file
+from quicksql.lsp.mask import Opaque, Ref, Source, mask_jinja
 
 
 def test_mask_preserves_length_and_line_structure() -> None:
@@ -68,7 +68,7 @@ def test_name_to_tag_round_trip_for_scope_lookup() -> None:
 
 
 def _write_run(tmp_path, body):
-    from qsql_demo.runner import run_project
+    from quicksql.runner import run_project
 
     nb = tmp_path / "n.qsql"
     nb.write_text(body)
@@ -78,7 +78,7 @@ def _write_run(tmp_path, body):
 
 
 def test_ref_columns_come_from_the_landed_cell(tmp_path) -> None:
-    from qsql_demo.lsp.schema import ref_columns
+    from quicksql.lsp.schema import ref_columns
 
     project = _write_run(
         tmp_path,
@@ -90,7 +90,7 @@ def test_ref_columns_come_from_the_landed_cell(tmp_path) -> None:
 
 
 def test_source_columns_read_a_csv_header(tmp_path) -> None:
-    from qsql_demo.lsp.schema import source_columns
+    from quicksql.lsp.schema import source_columns
 
     (tmp_path / "u.csv").write_text("member_id,plan_code\n1,AB\n")
     project = _write_run(
@@ -103,9 +103,9 @@ def test_source_columns_read_a_csv_header(tmp_path) -> None:
 
 @pytest.mark.postgres
 def test_table_columns_introspect_live_postgres(tmp_path) -> None:
-    from qsql_demo.lsp.schema import table_columns
+    from quicksql.lsp.schema import table_columns
 
-    dsn = "postgresql://qsql:qsql@localhost:5432/qsql_claims"
+    dsn = "postgresql://quicksql:quicksql@localhost:5432/quicksql_claims"
     nb = tmp_path / "n.qsql"
     nb.write_text(
         "-- @engine: postgres\n"
@@ -122,7 +122,7 @@ def test_table_columns_introspect_live_postgres(tmp_path) -> None:
 
 
 def test_diagnostics_flag_unknown_ref_at_the_cell_line(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = "-- @engine: duckdb\n-- @cell a\nSELECT * FROM {{ ref('nope') }};\n"
     diags = Analyzer().diagnostics(text, tmp_path)
@@ -131,7 +131,7 @@ def test_diagnostics_flag_unknown_ref_at_the_cell_line(tmp_path) -> None:
 
 
 def test_diagnostics_flag_cross_context_source_on_non_duckdb(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = "-- @engine: sqlite\n-- @cell a\nSELECT * FROM {{ source('u.csv') }};\n"
     diags = Analyzer().diagnostics(text, tmp_path)
@@ -139,7 +139,7 @@ def test_diagnostics_flag_cross_context_source_on_non_duckdb(tmp_path) -> None:
 
 
 def test_diagnostics_surface_sqlglot_syntax_errors(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = "-- @engine: duckdb\n-- @cell a\nSELECT * FROM WHERE 1;\n"
     diags = Analyzer().diagnostics(text, tmp_path)
@@ -147,7 +147,7 @@ def test_diagnostics_surface_sqlglot_syntax_errors(tmp_path) -> None:
 
 
 def _land_users(tmp_path, text):
-    from qsql_demo.runner import run_project
+    from quicksql.runner import run_project
 
     nb = tmp_path / "n.qsql"
     nb.write_text(text)
@@ -155,7 +155,7 @@ def _land_users(tmp_path, text):
 
 
 def test_completion_offers_ref_columns_and_alias_scopes_them(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = (
         "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
@@ -178,7 +178,7 @@ def test_completion_offers_ref_columns_and_alias_scopes_them(tmp_path) -> None:
 
 
 def test_completion_in_ref_call_offers_cell_names(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = (
         "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
@@ -195,9 +195,9 @@ def test_completion_in_ref_call_offers_cell_names(tmp_path) -> None:
 
 @pytest.mark.postgres
 def test_completion_alias_scopes_to_a_live_postgres_table(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
-    dsn = "postgresql://qsql:qsql@localhost:5432/qsql_claims"
+    dsn = "postgresql://quicksql:quicksql@localhost:5432/quicksql_claims"
     text = (
         "-- @engine: postgres\n"
         f"/*@ input: {{ postgres: {{ dsn: '{dsn}' }} }} */\n"
@@ -211,7 +211,7 @@ def test_completion_alias_scopes_to_a_live_postgres_table(tmp_path) -> None:
 
 
 def test_definition_jumps_from_ref_to_the_defining_cell(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = (
         "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
@@ -225,7 +225,7 @@ def test_definition_jumps_from_ref_to_the_defining_cell(tmp_path) -> None:
 
 
 def test_document_symbols_outline_every_cell(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = (
         "-- @engine: duckdb\n-- @cell a\nSELECT 1;\n-- @cell b\nSELECT 2;\n"
@@ -243,8 +243,8 @@ def test_server_registers_the_lsp_features_and_maps_diagnostics() -> None:
     pytest.importorskip("pygls", reason="install the 'lsp' extra")
     from lsprotocol import types
 
-    from qsql_demo.lsp.analysis import Diagnostic
-    from qsql_demo.lsp.server import _to_lsp_diagnostic, create_server
+    from quicksql.lsp.analysis import Diagnostic
+    from quicksql.lsp.server import _to_lsp_diagnostic, create_server
 
     server = create_server()
     registered = set(server.protocol.fm.features)
@@ -263,7 +263,7 @@ def test_server_registers_the_lsp_features_and_maps_diagnostics() -> None:
 
 
 def test_completion_scopes_each_join_alias_to_its_own_ref(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = (
         "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
@@ -272,7 +272,7 @@ def test_completion_scopes_each_join_alias_to_its_own_ref(tmp_path) -> None:
         "-- @cell down\n"
         "SELECT e. FROM {{ ref('users') }} u JOIN {{ ref('events') }} e USING (user_id)\n"
     )
-    from qsql_demo.runner import run_project
+    from quicksql.runner import run_project
 
     nb = tmp_path / "n.qsql"
     nb.write_text(text)
@@ -283,7 +283,7 @@ def test_completion_scopes_each_join_alias_to_its_own_ref(tmp_path) -> None:
 
 
 def test_completion_derives_cte_alias_columns_from_its_projection(tmp_path) -> None:
-    from qsql_demo.lsp.analysis import Analyzer
+    from quicksql.lsp.analysis import Analyzer
 
     text = (
         "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
@@ -292,7 +292,7 @@ def test_completion_derives_cte_alias_columns_from_its_projection(tmp_path) -> N
         "WITH w AS (SELECT user_id, name AS member_name FROM {{ ref('users') }})\n"
         "SELECT w. FROM w\n"
     )
-    from qsql_demo.runner import run_project
+    from quicksql.runner import run_project
 
     nb = tmp_path / "n.qsql"
     nb.write_text(text)

@@ -2,9 +2,9 @@ import polars as pl
 import pytest
 from textual.widgets import DataTable, TabbedContent
 
-from qsql_demo.compiler import compile_file
-from qsql_demo.scaffold import write_scaffold
-from qsql_demo.tui import QsqlApp
+from quicksql.compiler import compile_file
+from quicksql.scaffold import write_scaffold
+from quicksql.tui import QsqlApp
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def notebook(tmp_path):
 
 
 async def test_missing_file_shows_picker_and_template_creates(tmp_path) -> None:
-    from qsql_demo.tui import NotebookPicker
+    from quicksql.tui import NotebookPicker
 
     target = tmp_path / "base.qsql"
     app = QsqlApp(path=target, watch=False)
@@ -30,7 +30,7 @@ async def test_missing_file_shows_picker_and_template_creates(tmp_path) -> None:
 
 
 async def test_missing_file_picker_lists_existing_notebooks(tmp_path) -> None:
-    from qsql_demo.tui import NotebookPicker
+    from quicksql.tui import NotebookPicker
 
     write_scaffold(tmp_path / "other.qsql")
     app = QsqlApp(path=tmp_path / "base.qsql", watch=False)
@@ -47,7 +47,7 @@ async def test_missing_file_picker_lists_existing_notebooks(tmp_path) -> None:
 async def test_picker_lists_qsql_and_qsql_sql_but_ignores_plain_sql(tmp_path) -> None:
     from textual.widgets import OptionList
 
-    from qsql_demo.tui import NotebookPicker
+    from quicksql.tui import NotebookPicker
 
     (tmp_path / "pipeline.qsql").write_text("-- @cell a\nSELECT 1;\n")
     (tmp_path / "legacy.qsql.sql").write_text("-- @cell b\nSELECT 2;\n")
@@ -67,8 +67,8 @@ async def test_user_templates_offered_and_seed_the_requested_file(tmp_path, monk
     from textual.widgets import OptionList
 
     home = tmp_path / "home"
-    (home / ".qsql" / "templates").mkdir(parents=True)
-    (home / ".qsql" / "templates" / "metrics.qsql").write_text(
+    (home / ".quicksql" / "templates").mkdir(parents=True)
+    (home / ".quicksql" / "templates" / "metrics.qsql").write_text(
         "-- @cell tpl\nSELECT 7 AS seven;\n"
     )
     monkeypatch.setenv("HOME", str(home))
@@ -91,7 +91,7 @@ async def test_user_templates_offered_and_seed_the_requested_file(tmp_path, monk
 
 
 async def test_o_switches_between_notebooks_and_resets_state(tmp_path) -> None:
-    from qsql_demo.tui import NotebookPicker
+    from quicksql.tui import NotebookPicker
 
     alpha = write_scaffold(tmp_path / "alpha.qsql")
     beta = tmp_path / "beta.qsql"
@@ -116,7 +116,7 @@ async def test_o_switches_between_notebooks_and_resets_state(tmp_path) -> None:
 async def test_template_create_prompts_for_name_and_creates_named_file(tmp_path) -> None:
     from textual.widgets import Input
 
-    from qsql_demo.tui import NotebookPicker
+    from quicksql.tui import NotebookPicker
 
     alpha = write_scaffold(tmp_path / "alpha.qsql")
     app = QsqlApp(path=alpha, watch=False)
@@ -141,7 +141,7 @@ async def test_template_create_prompts_for_name_and_creates_named_file(tmp_path)
 async def test_template_name_collision_warns_and_stays(tmp_path) -> None:
     from textual.widgets import Input, Static
 
-    from qsql_demo.tui import NotebookPicker
+    from quicksql.tui import NotebookPicker
 
     alpha = write_scaffold(tmp_path / "alpha.qsql")
     app = QsqlApp(path=alpha, watch=False)
@@ -168,7 +168,7 @@ async def test_template_name_collision_warns_and_stays(tmp_path) -> None:
 async def test_template_prompt_escape_returns_to_list_not_cancel(tmp_path) -> None:
     from textual.widgets import Input
 
-    from qsql_demo.tui import NotebookPicker
+    from quicksql.tui import NotebookPicker
 
     alpha = write_scaffold(tmp_path / "alpha.qsql")
     app = QsqlApp(path=alpha, watch=False)
@@ -665,7 +665,7 @@ def test_yank_reaches_the_terminal_clipboard_and_pastes_into_nvim(tmp_path) -> N
         time.sleep(wait)
 
     try:
-        t("new-session", "-d", "-x", "110", "-y", "30", "-c", str(tmp_path), "qsql tui base.qsql")
+        t("new-session", "-d", "-x", "110", "-y", "30", "-c", str(tmp_path), "quicksql tui base.qsql")
         t("set-option", "-g", "set-clipboard", "on")
         time.sleep(5)
         keys("R", wait=3.0)  # run all
@@ -707,7 +707,7 @@ async def test_run_all_populates_results_and_dive(notebook) -> None:
 async def test_question_mark_opens_help_overlay_covering_all_key_layers(notebook) -> None:
     # the help overlay must document keys from every layer, including the
     # vim/sheet keys that live only in on_key and appear in no footer binding
-    from qsql_demo.tui import HelpScreen
+    from quicksql.tui import HelpScreen
 
     documented = {
         key.strip()

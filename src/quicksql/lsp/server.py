@@ -2,7 +2,7 @@
 
 Thin by design — every handler pulls the document text, hands it to the
 `Analyzer`, and maps the plain result back to lsprotocol types. Started by
-``qsql lsp`` (see `cli.py`), spoken over stdio.
+``quicksql lsp`` (see `cli.py`), spoken over stdio.
 """
 
 from __future__ import annotations

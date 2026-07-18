@@ -2,7 +2,7 @@
 
 Kinds: config/behavior plugins (``@plugin``), executors (``@executor``),
 sinks (``@sink``), and source readers (``@source_reader``). Registration is
-import-time; :mod:`qsql_demo.bootstrap` imports the builtin modules.
+import-time; :mod:`quicksql.bootstrap` imports the builtin modules.
 """
 
 from __future__ import annotations

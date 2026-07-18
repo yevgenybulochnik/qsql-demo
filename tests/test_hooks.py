@@ -4,10 +4,10 @@ from dataclasses import replace
 
 import pytest
 
-from qsql_demo.compiler import compile_text
-from qsql_demo.errors import ConfigError
-from qsql_demo.plugins.base import Plugin
-from qsql_demo.registry import PLUGINS, plugin
+from quicksql.compiler import compile_text
+from quicksql.errors import ConfigError
+from quicksql.plugins.base import Plugin
+from quicksql.registry import PLUGINS, plugin
 
 # ---------- before_execute / after_execute sugar ----------
 

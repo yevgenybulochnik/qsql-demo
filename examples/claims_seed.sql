@@ -1,19 +1,19 @@
--- Synthetic pharmacy/medical claims + eligibility for smoke-testing qsql
+-- Synthetic pharmacy/medical claims + eligibility for smoke-testing quicksql
 -- against Postgres. Entirely fake and deterministic (generate_series, no
 -- random()) — reseeding produces identical data; nothing here is PHI.
 -- Every table and column carries a COMMENT: the TUI catalog browser (S)
 -- surfaces them in the field-path sheet's description column.
 --
--- The qsql_claims database is created by docker/pg-init on a *fresh* volume;
+-- The quicksql_claims database is created by docker/pg-init on a *fresh* volume;
 -- on an existing volume create it once, then seed (both idempotent):
 --
---   docker compose exec -T postgres psql -U qsql -d qsql -q <<'SQL'
---   SELECT 'CREATE DATABASE qsql_claims OWNER qsql'
---   WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'qsql_claims')\gexec
+--   docker compose exec -T postgres psql -U quicksql -d quicksql -q <<'SQL'
+--   SELECT 'CREATE DATABASE quicksql_claims OWNER quicksql'
+--   WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'quicksql_claims')\gexec
 --   SQL
---   docker compose exec -T postgres psql -U qsql -d qsql_claims -q < examples/claims_seed.sql
+--   docker compose exec -T postgres psql -U quicksql -d quicksql_claims -q < examples/claims_seed.sql
 --
--- Then: uv run qsql tui examples/claims.qsql
+-- Then: uv run quicksql tui examples/claims.qsql
 
 DROP SCHEMA IF EXISTS claims CASCADE;
 CREATE SCHEMA claims;

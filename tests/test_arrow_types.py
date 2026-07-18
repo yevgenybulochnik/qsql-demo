@@ -14,10 +14,10 @@ import pytest
 
 pa = pytest.importorskip("pyarrow")
 
-from qsql_demo.compiler import compile_text
-from qsql_demo.executors.base import register_frame
-from qsql_demo.executors.bigquery_exec import BigQueryExecutor
-from qsql_demo.models import RunContext
+from quicksql.compiler import compile_text
+from quicksql.executors.base import register_frame
+from quicksql.executors.bigquery_exec import BigQueryExecutor
+from quicksql.models import RunContext
 
 
 @pytest.fixture

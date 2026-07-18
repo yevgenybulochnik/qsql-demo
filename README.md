@@ -1,4 +1,4 @@
-# qsql — a notebook for SQL, in one file
+# quicksql — a notebook for SQL, in one file
 
 A single `.sql` file is the notebook: valid SQL split into named **cells** by comment
 directives. Config is YAML inside `@`-comments; SQL bodies are Jinja-templated. Cells
@@ -6,7 +6,7 @@ form a dependency DAG, run on pluggable **engines** (DuckDB, SQLite, Postgres, B
 through pluggable **sinks** (parquet files, DuckDB tables, Postgres tables) that also
 define how downstream cells read them back.
 
-![qsql TUI: Postgres cells, a cross-engine DuckDB cell, an nvim edit triggering an autorun rerun, and the VisiData deep-dive](demo/qsql-demo.gif)
+![quicksql TUI: Postgres cells, a cross-engine DuckDB cell, an nvim edit triggering an autorun rerun, and the VisiData deep-dive](demo/quicksql-demo.gif)
 
 *Two cells run in Postgres, next to the data; the DuckDB cell joins their results. Editing
 the SQL in nvim reruns just the changed cell and its downstream — `top_customers` is
@@ -35,13 +35,13 @@ GROUP BY 1;
 
 ```console
 $ uv sync
-$ uv run qsql            # scaffolds base.qsql
-$ uv run qsql run        # runs every cell, lands data/<cell>.parquet
-$ uv run qsql list       # cells, topo order, engine -> sink, autorun
-$ uv run qsql show report        # rendered SQL for one cell
-$ uv run qsql watch      # rerun changed cells + dependents on save
-$ uv run qsql tui        # VisiData-style TUI (j/k, Enter dive, F freq, V real vd)
-$ uv run qsql run --set output.type=duckdb --set vars.active_only=false
+$ uv run quicksql            # scaffolds base.qsql
+$ uv run quicksql run        # runs every cell, lands data/<cell>.parquet
+$ uv run quicksql list       # cells, topo order, engine -> sink, autorun
+$ uv run quicksql show report        # rendered SQL for one cell
+$ uv run quicksql watch      # rerun changed cells + dependents on save
+$ uv run quicksql tui        # VisiData-style TUI (j/k, Enter dive, F freq, V real vd)
+$ uv run quicksql run --set output.type=duckdb --set vars.active_only=false
 ```
 
 ## How it works
@@ -54,7 +54,7 @@ $ uv run qsql run --set output.type=duckdb --set vars.active_only=false
   registered via decorators. A plugin bundles config fields (with pydantic validation)
   and can decorate cell execution (retries, caching, SQL emission...). See
   [docs/plugin-authoring.md](docs/plugin-authoring.md).
-- **Run-time overrides** — `--set key.path=value` and `QSQL_KEY__PATH=value` layer on
+- **Run-time overrides** — `--set key.path=value` and `QUICKSQL_KEY__PATH=value` layer on
   top of global → cell config.
 
 Optional extras: `uv sync --extra bigquery` (BigQuery engine),
@@ -70,7 +70,7 @@ Built test-first (red-green-refactor) with pytest; commits follow Conventional C
 
 ```console
 $ uv run pytest          # network/bigquery/postgres-gated tests are skipped by default
-$ docker compose up -d --wait                 # local Postgres (qsql + qsql_test databases)
+$ docker compose up -d --wait                 # local Postgres (quicksql + quicksql_test databases)
 $ uv run --extra postgres pytest -m postgres  # postgres tests only
 $ uv run --extra postgres pytest -m "not (network or bigquery)"   # everything but the cloud
 ```

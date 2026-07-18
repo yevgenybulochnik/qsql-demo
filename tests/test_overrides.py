@@ -1,7 +1,7 @@
 import pytest
 
-from qsql_demo.errors import ConfigError
-from qsql_demo.overrides import gather_overrides, parse_env, parse_set
+from quicksql.errors import ConfigError
+from quicksql.overrides import gather_overrides, parse_env, parse_set
 
 
 def test_parse_set_nested_and_yaml_scalars() -> None:
@@ -20,10 +20,10 @@ def test_parse_set_without_equals_raises() -> None:
 
 
 def test_parse_env_prefix_and_nesting() -> None:
-    got = parse_env({"QSQL_OUTPUT__TYPE": "duckdb", "QSQL_AUTORUN": "false", "PATH": "/bin"})
+    got = parse_env({"QUICKSQL_OUTPUT__TYPE": "duckdb", "QUICKSQL_AUTORUN": "false", "PATH": "/bin"})
     assert got == {"output": {"type": "duckdb"}, "autorun": False}
 
 
 def test_cli_set_wins_over_env() -> None:
-    got = gather_overrides(["output.type=parquet"], {"QSQL_OUTPUT__TYPE": "duckdb"})
+    got = gather_overrides(["output.type=parquet"], {"QUICKSQL_OUTPUT__TYPE": "duckdb"})
     assert got["output"]["type"] == "parquet"

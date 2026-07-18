@@ -5,7 +5,7 @@ import duckdb
 import polars as pl
 import pytest
 
-from qsql_demo.catalog import (
+from quicksql.catalog import (
     CatalogCache,
     CatalogNode,
     bigquery_context_node,
@@ -17,11 +17,11 @@ from qsql_demo.catalog import (
     sink_output_node,
     sqlite_context_node,
 )
-from qsql_demo.compiler import compile_text
-from qsql_demo.config import resolve_cell
-from qsql_demo.executors.bigquery_exec import BigQueryExecutor
-from qsql_demo.executors.postgres_exec import PostgresExecutor
-from qsql_demo.sinks import make_sink
+from quicksql.compiler import compile_text
+from quicksql.config import resolve_cell
+from quicksql.executors.bigquery_exec import BigQueryExecutor
+from quicksql.executors.postgres_exec import PostgresExecutor
+from quicksql.sinks import make_sink
 
 FIELD_PATH_COLUMNS = ["column", "field_path", "type", "mode", "description"]
 
@@ -213,7 +213,7 @@ def test_catalog_directive_supports_other_engines(tmp_path, monkeypatch) -> None
 
 
 def test_catalog_directive_is_global_only(tmp_path) -> None:
-    from qsql_demo.errors import QsqlError
+    from quicksql.errors import QsqlError
 
     with pytest.raises(QsqlError, match="catalog"):
         compile_text(
@@ -223,7 +223,7 @@ def test_catalog_directive_is_global_only(tmp_path) -> None:
 
 
 def test_catalog_directive_rejects_unknown_engines(tmp_path) -> None:
-    from qsql_demo.errors import QsqlError
+    from quicksql.errors import QsqlError
 
     with pytest.raises(QsqlError, match="snowflake"):
         compile_text(

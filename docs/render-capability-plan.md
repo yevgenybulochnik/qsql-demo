@@ -62,7 +62,7 @@ seeding them. All existing render/compiler behavior tests pass unchanged (they d
 plugin makes `{{ var(...) }}` an undefined-template error — delete the plugin, lose the
 feature.
 
-**Phase 3 — introspection + docs.** `qsql explain` already lists `render_context`
+**Phase 3 — introspection + docs.** `quicksql explain` already lists `render_context`
 participants (now: refs, sources, vars, env — assert in the CLI test). Update
 `docs/plugin-authoring.md` (contribute-only contract, capability verbs, collision
 guard) and CLAUDE.md.
@@ -75,6 +75,6 @@ guard) and CLAUDE.md.
 
 ## Verification
 
-Full suite green after each phase; `uv run qsql run` + `explain` against the scaffold;
+Full suite green after each phase; `uv run quicksql run` + `explain` against the scaffold;
 the ownership-deletion test; a scratch third-party plugin contributing a custom global
 and colliding on purpose to see the error message.

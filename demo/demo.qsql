@@ -1,9 +1,9 @@
--- qsql demo — one file of valid SQL, split into cells, across two engines.
+-- quicksql demo — one file of valid SQL, split into cells, across two engines.
 -- Postgres cells run next to the data; the DuckDB cell joins their results.
 -- Seed the tables with: demo/seed.sql (see demo/README.md)
 
 /*@
-input: { postgres: { dsn: "postgresql://qsql:qsql@localhost:5432/qsql" } }
+input: { postgres: { dsn: "postgresql://quicksql:quicksql@localhost:5432/quicksql" } }
 output: { type: parquet, dir: data/ }
 */
 

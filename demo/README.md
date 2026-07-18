@@ -7,9 +7,9 @@ deep-dive.
 
 Two tapes, two stories:
 
-- **`demo.tape`** → `qsql-demo.gif` — *the workflow.* Edits an existing cell; the
+- **`demo.tape`** → `quicksql-demo.gif` — *the workflow.* Edits an existing cell; the
   rerun cascades to its downstream while the unrelated cell stays untouched.
-- **`build.tape`** → `qsql-build.gif` — *the format.* Writes a cross-engine cell
+- **`build.tape`** → `quicksql-build.gif` — *the format.* Writes a cross-engine cell
   on camera; saving it makes the cell appear in the DAG and run itself (a new
   cell has no previous hash, so watch mode counts it as changed).
 
@@ -18,17 +18,17 @@ Two tapes, two stories:
 | `demo.qsql` | the finished notebook — two Postgres cells + one DuckDB cell |
 | `build.qsql` | the same, minus the DuckDB cell — `build.tape` types it live |
 | `seed.sql` | the demo tables (8 customers, 5k orders) |
-| `scene.sh` | the tmux layout: nvim (left) \| `qsql tui` (right); takes a notebook name |
+| `scene.sh` | the tmux layout: nvim (left) \| `quicksql tui` (right); takes a notebook name |
 | `demo.tape`, `build.tape` | the [VHS](https://github.com/charmbracelet/vhs) scripts |
 
 ## Regenerating the GIFs
 
 ```console
 $ docker compose up -d --wait
-$ docker compose exec -T postgres psql -U qsql -d qsql -q < demo/seed.sql
+$ docker compose exec -T postgres psql -U quicksql -d quicksql -q < demo/seed.sql
 $ uv sync --extra postgres --extra visidata
-$ vhs demo/demo.tape                      # from the repo root -> demo/qsql-demo.gif
-$ vhs demo/build.tape                     #                    -> demo/qsql-build.gif
+$ vhs demo/demo.tape                      # from the repo root -> demo/quicksql-demo.gif
+$ vhs demo/build.tape                     #                    -> demo/quicksql-build.gif
 ```
 
 Needs `vhs`, `ttyd`, `ffmpeg`, `tmux` and `nvim` on PATH. VHS shells out to ffmpeg

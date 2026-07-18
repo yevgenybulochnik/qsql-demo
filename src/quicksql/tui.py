@@ -1,4 +1,4 @@
-"""VisiData-style Textual TUI: master-detail over a qsql project, reflect-only.
+"""VisiData-style Textual TUI: master-detail over a quicksql project, reflect-only.
 
 Top: the cell list (engine -> sink, autorun, status, rows). Below: tabs for
 SQL (t toggles raw/rendered), Data (a stack of Polars Sheets with vim keys),
@@ -50,7 +50,7 @@ from .watcher import config_only_changes, hashes_of, plan_rerun
 
 class NotebookPicker(ModalScreen):
     """Choose a notebook in the directory, or create one from a starting
-    template (builtin, plus any under ~/.qsql/templates). Picking a template
+    template (builtin, plus any under ~/.quicksql/templates). Picking a template
     prompts for the new file's name, prefilled with a default — Enter accepts,
     Esc steps back to the list."""
 
@@ -216,7 +216,7 @@ class HelpScreen(ModalScreen):
                 grid.add_row(Text(keys), Text(what))
             blocks.append(grid)
         with Vertical(id="help"):
-            yield Static("qsql keys — ? or Esc to close", id="help_title")
+            yield Static("quicksql keys — ? or Esc to close", id="help_title")
             with VerticalScroll(id="help_body"):
                 yield Static(Group(*blocks))
 
@@ -225,7 +225,7 @@ class HelpScreen(ModalScreen):
 
 
 class QsqlApp(App):
-    TITLE = "qsql"
+    TITLE = "quicksql"
 
     CSS = """
     #cells { height: 40%; max-height: 12; border: solid $primary; }
@@ -394,7 +394,7 @@ class QsqlApp(App):
     def _load_notebook(self, path: Path | str) -> None:
         """Open a notebook (fresh state), arming and watching per-notebook."""
         self.path = Path(path)
-        self.title = f"qsql · {self.path.name}"
+        self.title = f"quicksql · {self.path.name}"
         self.results = {}
         self.running = set()
         self.panes = [[]]

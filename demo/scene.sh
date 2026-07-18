@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Demo layout: nvim (left) | qsql tui (right), one tmux window.
+# Demo layout: nvim (left) | quicksql tui (right), one tmux window.
 #
 #   ./demo/scene.sh [notebook]      # default: demo.qsql
 #
@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 NOTEBOOK="${1:-demo.qsql}"
-SESSION=qsqldemo
+SESSION=quicksqldemo
 ACTIVATE="source ../.venv/bin/activate"
 
 # The tapes edit the notebook for real (nvim writes it — that save is what
@@ -37,6 +37,6 @@ tmux send-keys -t "$SESSION" "$ACTIVATE && clear && nvim $NOTEBOOK" Enter
 
 # right: the TUI watching it (ends active, so the tape's first keys reach it)
 tmux split-window -h -t "$SESSION" -c "$PWD" "${LOCALE[@]}"
-tmux send-keys -t "$SESSION" "$ACTIVATE && clear && qsql tui $NOTEBOOK" Enter
+tmux send-keys -t "$SESSION" "$ACTIVATE && clear && quicksql tui $NOTEBOOK" Enter
 
 tmux attach -t "$SESSION"

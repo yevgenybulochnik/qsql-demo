@@ -2,8 +2,8 @@ import os
 import queue
 import threading
 
-from qsql_demo.compiler import compile_file
-from qsql_demo.watcher import hashes_of, plan_rerun, run_changed, touches, watch_events
+from quicksql.compiler import compile_file
+from quicksql.watcher import hashes_of, plan_rerun, run_changed, touches, watch_events
 
 V1 = """\
 -- @cell a
@@ -110,7 +110,7 @@ def test_run_changed_streams_run_events(tmp_path) -> None:
 
 
 def test_config_only_edit_is_detected_but_not_rerun(tmp_path) -> None:
-    from qsql_demo.watcher import config_only_changes
+    from quicksql.watcher import config_only_changes
 
     f = tmp_path / "base.sql"
     f.write_text(V1)

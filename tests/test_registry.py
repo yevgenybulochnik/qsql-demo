@@ -1,10 +1,10 @@
 import pytest
 from pydantic import BaseModel
 
-from qsql_demo.errors import ConfigError
-from qsql_demo.models import Scope
-from qsql_demo.plugins.base import Plugin, qfield
-from qsql_demo.registry import PLUGINS, PluginRegistry, Registry, plugin
+from quicksql.errors import ConfigError
+from quicksql.models import Scope
+from quicksql.plugins.base import Plugin, qfield
+from quicksql.registry import PLUGINS, PluginRegistry, Registry, plugin
 
 
 def test_registry_get_unknown_raises() -> None:

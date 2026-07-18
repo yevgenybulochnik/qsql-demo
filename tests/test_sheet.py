@@ -1,6 +1,6 @@
 import polars as pl
 
-from qsql_demo.sheet import Sheet
+from quicksql.sheet import Sheet
 
 FRAME = pl.DataFrame(
     {

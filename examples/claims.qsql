@@ -1,7 +1,7 @@
 /*@
 input:
   postgres:
-    dsn: postgresql://qsql:qsql@localhost:5432/qsql_claims
+    dsn: postgresql://quicksql:quicksql@localhost:5432/quicksql_claims
 */
 -- Smoke test against the synthetic claims warehouse (examples/claims_seed.sql).
 -- The three postgres cells run next to the data and land parquet; the last

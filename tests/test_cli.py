@@ -2,7 +2,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from qsql_demo.cli import app
+from quicksql.cli import app
 
 runner = CliRunner()
 
@@ -118,8 +118,8 @@ def test_explain_shows_chain_hooks_and_cells(tmp_path) -> None:
 PLUGIN_MODULE = """\
 from pydantic import BaseModel
 
-from qsql_demo.plugins import Plugin, qfield
-from qsql_demo.registry import plugin
+from quicksql.plugins import Plugin, qfield
+from quicksql.registry import plugin
 
 
 @plugin
@@ -143,8 +143,8 @@ def test_plugins_flag_loads_module_from_path(tmp_path) -> None:
     assert result.exit_code == 0, result.output
 
 
-def test_qsqlrc_next_to_file_autoloads(tmp_path) -> None:
-    (tmp_path / "qsqlrc.py").write_text(PLUGIN_MODULE)
+def test_quicksqlrc_next_to_file_autoloads(tmp_path) -> None:
+    (tmp_path / "quicksqlrc.py").write_text(PLUGIN_MODULE)
     f = tmp_path / "pipeline.sql"
     f.write_text(GREETING_FILE)
     result = runner.invoke(app, ["run", str(f)])

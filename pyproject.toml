@@ -1,7 +1,7 @@
 [project]
-name = "qsql-demo"
+name = "quicksql"
 version = "0.1.0"
-description = "qsql — a CLI notebook for SQL, driven by comment directives"
+description = "quicksql — a CLI notebook for SQL, driven by comment directives"
 readme = "README.md"
 authors = [
     { name = "Yevgeny Bulochnik", email = "yevgeny.bulochnik@gmail.com" }
@@ -25,7 +25,8 @@ visidata = ["visidata>=3"]
 lsp = ["pygls>=1.3", "sqlglot>=25"]
 
 [project.scripts]
-qsql = "qsql_demo.cli:app"
+quicksql = "quicksql.cli:app"
+qsql = "quicksql.cli:app"  # short alias
 
 [dependency-groups]
 dev = [

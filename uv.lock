@@ -1184,7 +1184,7 @@ wheels = [
 ]
 
 [[package]]
-name = "qsql-demo"
+name = "quicksql"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

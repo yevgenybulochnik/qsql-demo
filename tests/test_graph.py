@@ -1,7 +1,7 @@
 import pytest
 
-from qsql_demo.errors import CycleError
-from qsql_demo.graph import downstream, topo_sort
+from quicksql.errors import CycleError
+from quicksql.graph import downstream, topo_sort
 
 
 def test_topo_sort_chain_and_branch() -> None:

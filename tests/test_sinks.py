@@ -1,9 +1,9 @@
 import duckdb
 import pytest
 
-from qsql_demo.errors import SinkError
-from qsql_demo.models import RenderedCell
-from qsql_demo.registry import SINKS
+from quicksql.errors import SinkError
+from quicksql.models import RenderedCell
+from quicksql.registry import SINKS
 
 
 def _cell(name: str) -> RenderedCell:
@@ -51,7 +51,7 @@ def test_parquet_sink_lands_hugeint_as_decimal_not_double(conn, tmp_path) -> Non
 
 
 def test_parquet_sink_hugeint_overflow_fails_loudly(tmp_path) -> None:
-    from qsql_demo.compiler import compile_text
+    from quicksql.compiler import compile_text
 
     project = compile_text(
         "-- @cell too_big\nSELECT 170141183460469231731687303715884105727::HUGEINT AS h;",

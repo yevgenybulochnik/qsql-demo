@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from qsql_demo import registry
-from qsql_demo.bootstrap import load_builtins
+from quicksql import registry
+from quicksql.bootstrap import load_builtins
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +21,7 @@ def pg_dsn():
     """DSN of the compose Postgres's test database (docker compose up -d --wait);
     postgres-marked tests skip when psycopg or the server is unavailable."""
     dsn = os.environ.get(
-        "QSQL_TEST_PG_DSN", "postgresql://qsql:qsql@localhost:5432/qsql_test"
+        "QUICKSQL_TEST_PG_DSN", "postgresql://quicksql:quicksql@localhost:5432/quicksql_test"
     )
     psycopg = pytest.importorskip(
         "psycopg", reason="postgres tests need the 'postgres' extra"

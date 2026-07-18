@@ -1,6 +1,6 @@
--- Demo data for demo.qsql, loaded into the compose Postgres's `qsql` database:
+-- Demo data for demo.qsql, loaded into the compose Postgres's `quicksql` database:
 --   docker compose up -d --wait
---   docker compose exec -T postgres psql -U qsql -d qsql -q < demo/seed.sql
+--   docker compose exec -T postgres psql -U quicksql -d quicksql -q < demo/seed.sql
 DROP TABLE IF EXISTS orders, customers;
 
 CREATE TABLE customers (

@@ -1,23 +1,23 @@
 """Integration tests against the compose Postgres (docker compose up -d --wait).
 
 Run with: uv run --extra postgres pytest -m postgres
-Each test drops/recreates its own tables in qsql_test, so runs are idempotent.
+Each test drops/recreates its own tables in quicksql_test, so runs are idempotent.
 """
 
 import duckdb
 import pytest
 
-from qsql_demo.compiler import compile_text
-from qsql_demo.errors import ExecutorError
-from qsql_demo.models import RunContext
-from qsql_demo.registry import EXECUTORS
+from quicksql.compiler import compile_text
+from quicksql.errors import ExecutorError
+from quicksql.models import RunContext
+from quicksql.registry import EXECUTORS
 
 pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture
 def seeded(pg_dsn):
-    """A small nums table in qsql_test; yields the dsn."""
+    """A small nums table in quicksql_test; yields the dsn."""
     import psycopg
 
     with psycopg.connect(pg_dsn, autocommit=True) as con:
@@ -32,8 +32,8 @@ def _cell_config(dsn: str) -> str:
 
 
 def test_executor_runs_real_sql(seeded, tmp_path) -> None:
-    from qsql_demo.config import resolve_cell
-    from qsql_demo.models import RenderedCell
+    from quicksql.config import resolve_cell
+    from quicksql.models import RenderedCell
 
     cfg = resolve_cell({}, {"input": {"postgres": {"dsn": seeded}}})
     cell = RenderedCell(
@@ -53,8 +53,8 @@ def test_executor_runs_real_sql(seeded, tmp_path) -> None:
 
 def test_real_driver_errors_wrap_as_executor_error(seeded, tmp_path) -> None:
     """The offline test fakes the driver; only a real psycopg error proves the wrap."""
-    from qsql_demo.config import resolve_cell
-    from qsql_demo.models import RenderedCell
+    from quicksql.config import resolve_cell
+    from quicksql.models import RenderedCell
 
     cfg = resolve_cell({}, {"input": {"postgres": {"dsn": seeded}}})
     cell = RenderedCell(
@@ -91,7 +91,7 @@ def test_same_context_cells_share_session_temps(seeded, tmp_path) -> None:
 def test_failed_cell_does_not_poison_the_session(seeded, tmp_path) -> None:
     """watch/TUI keep one session across reruns: without autocommit a failed
     statement would leave it aborted and every later cell would fail too."""
-    from qsql_demo.runner import RunSession, run_project
+    from quicksql.runner import RunSession, run_project
 
     session = RunSession()
     try:

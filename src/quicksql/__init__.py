@@ -1,4 +1,4 @@
-"""qsql — a CLI notebook for SQL, driven by comment directives."""
+"""quicksql — a CLI notebook for SQL, driven by comment directives."""
 
 from .compiler import Project, compile_file, compile_text
 from .parser import parse_file, parse_text

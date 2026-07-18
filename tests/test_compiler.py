@@ -1,7 +1,7 @@
 import pytest
 
-from qsql_demo.compiler import compile_text
-from qsql_demo.errors import ConfigError
+from quicksql.compiler import compile_text
+from quicksql.errors import ConfigError
 
 PIPELINE = """\
 -- @engine: duckdb
@@ -76,7 +76,7 @@ def test_extensions_union_config_and_render_collected(tmp_path) -> None:
 
 
 def test_all_config_errors_reported_together_with_lines(tmp_path) -> None:
-    from qsql_demo.errors import ConfigErrorGroup
+    from quicksql.errors import ConfigErrorGroup
 
     text = (
         "-- @cell good\nSELECT 1;\n"
@@ -94,7 +94,7 @@ def test_all_config_errors_reported_together_with_lines(tmp_path) -> None:
 
 
 def test_all_render_errors_reported_together(tmp_path) -> None:
-    from qsql_demo.errors import ConfigErrorGroup
+    from quicksql.errors import ConfigErrorGroup
 
     text = (
         "-- @cell a\nSELECT * FROM {{ ref('ghost') }};\n"
@@ -113,7 +113,7 @@ def test_single_error_still_matches_substring(tmp_path) -> None:
 
 
 def test_cycle_reported(tmp_path) -> None:
-    from qsql_demo.errors import CycleError
+    from quicksql.errors import CycleError
 
     with pytest.raises(CycleError):
         compile_text(

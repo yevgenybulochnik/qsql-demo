@@ -24,7 +24,7 @@ class EmptyConfig(BaseModel):
 
 
 def qfield(default: Any = None, *, merge: Merge = Merge.OVERRIDE, **kwargs: Any) -> Any:
-    """A pydantic Field carrying qsql's per-field merge strategy."""
+    """A pydantic Field carrying quicksql's per-field merge strategy."""
     extra = dict(kwargs.pop("json_schema_extra", None) or {})
     extra["qsql_merge"] = merge.value
     return Field(default, json_schema_extra=extra, **kwargs)

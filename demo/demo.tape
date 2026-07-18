@@ -1,4 +1,4 @@
-# qsql demo GIF — regenerate with:  vhs demo/demo.tape   (run from the repo root)
+# quicksql demo GIF — regenerate with:  vhs demo/demo.tape   (run from the repo root)
 #
 # Shows: Postgres cells running next to the data, a cross-engine DuckDB cell
 # joining their results, a live nvim edit triggering an autorun rerun of just
@@ -7,7 +7,7 @@
 # Prereqs: docker compose up -d --wait; uv sync --extra postgres --extra visidata;
 #          demo data seeded (see demo/README.md).
 
-Output "demo/qsql-demo.gif"
+Output "demo/quicksql-demo.gif"
 
 Require tmux
 Require nvim
@@ -25,7 +25,7 @@ Type "cd demo" Enter
 Type "clear" Enter
 Show
 
-# --- the layout: nvim | qsql tui --------------------------------------------
+# --- the layout: nvim | quicksql tui --------------------------------------------
 Type "./scene.sh demo.qsql" Sleep 700ms Enter
 Sleep 8s
 

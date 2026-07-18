@@ -3,7 +3,7 @@
 -- Seed the tables with demo/seed.sql (see demo/README.md).
 
 /*@
-input: { postgres: { dsn: "postgresql://qsql:qsql@localhost:5432/qsql" } }
+input: { postgres: { dsn: "postgresql://quicksql:quicksql@localhost:5432/quicksql" } }
 output: { type: parquet, dir: data/ }
 */
 

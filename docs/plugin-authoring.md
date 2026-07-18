@@ -1,4 +1,4 @@
-# Writing qsql plugins
+# Writing quicksql plugins
 
 A plugin bundles up to two capabilities; ship either or both:
 
@@ -9,9 +9,9 @@ A plugin bundles up to two capabilities; ship either or both:
 ```python
 from pydantic import BaseModel, field_validator
 
-from qsql_demo.models import Merge, Scope
-from qsql_demo.plugins import Plugin, qfield
-from qsql_demo.registry import plugin
+from quicksql.models import Merge, Scope
+from quicksql.plugins import Plugin, qfield
+from quicksql.registry import plugin
 
 
 @plugin
@@ -65,7 +65,7 @@ inspect them; exceptions your plugin raises are caught outside the chain and deg
 that cell to an error result without killing the run. Builtin `EmitSql`
 (`plugins/emit_sql.py`) is the reference implementation: global `render_dir` config +
 a `run` hook that writes each cell's rendered SQL before delegating —
-`qsql run --set render_dir=build/sql`.
+`quicksql run --set render_dir=build/sql`.
 
 ## Render seams (compile time)
 
@@ -107,7 +107,7 @@ Every builtin directive owns its behavior through one of these:
   notifications around the run loop (setup, summaries, alerts); failures are logged
   to `ctx.log`, never fatal.
 
-`qsql explain [file]` prints the effective run chain and every hook's participants —
+`quicksql explain [file]` prints the effective run chain and every hook's participants —
 the runtime order is registry state, and this makes it readable.
 
 ## Other extension points
@@ -127,5 +127,5 @@ the runtime order is registry state, and this makes it readable.
 
 ## Loading
 
-- `qsql run --plugins my_plugins` (dotted module) or `--plugins ./my_plugins.py`
-- a `qsqlrc.py` next to the notebook file loads automatically
+- `quicksql run --plugins my_plugins` (dotted module) or `--plugins ./my_plugins.py`
+- a `quicksqlrc.py` next to the notebook file loads automatically

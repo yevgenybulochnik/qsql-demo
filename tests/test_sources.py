@@ -1,7 +1,7 @@
 import pytest
 
-from qsql_demo.errors import ConfigError
-from qsql_demo.sources import reader_for, sql_literal
+from quicksql.errors import ConfigError
+from quicksql.sources import reader_for, sql_literal
 
 
 def test_reader_inferred_from_extension() -> None:
