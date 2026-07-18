@@ -252,6 +252,45 @@ def test_completion_alias_scopes_to_a_fake_bigquery_table(tmp_path, monkeypatch)
     assert "event_id" in fields and "name" in fields
 
 
+def test_completion_uses_the_query_project_for_cross_project_tables(
+    tmp_path, monkeypatch
+) -> None:
+    """`other-proj.analytics.events` must introspect other-proj — not silently
+    resolve `analytics.events` against the cell's default project."""
+    from types import SimpleNamespace
+
+    from quicksql.executors.bigquery_exec import BigQueryExecutor
+    from quicksql.lsp.analysis import Analyzer
+
+    seen: list[tuple[str | None, str]] = []  # (client's project, get_table path)
+
+    def make(self, spec):
+        class FakeClient:
+            def get_table(self, path):
+                seen.append((spec.get("project"), path))
+                if spec.get("project") != "other-proj":
+                    raise RuntimeError(f"no such table in project {spec.get('project')}")
+                return SimpleNamespace(
+                    schema=[
+                        SimpleNamespace(
+                            name="event_id", field_type="INT64", mode="",
+                            fields=(), description="",
+                        )
+                    ]
+                )
+
+        return FakeClient()
+
+    monkeypatch.setattr(BigQueryExecutor, "make_client", make)
+    text = (
+        "-- @input: { bigquery: { project: p } }\n"
+        "-- @cell c\nSELECT e. FROM `other-proj.analytics.events` AS e\n"
+    )
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT e."))
+    assert [c.label for c in comps if c.kind == "field"] == ["event_id"]
+    assert seen == [("other-proj", "analytics.events")]
+
+
 @pytest.mark.bigquery
 def test_completion_alias_scopes_to_an_emulator_bigquery_table(tmp_path, bq_emulator) -> None:
     from google.cloud import bigquery as bq
