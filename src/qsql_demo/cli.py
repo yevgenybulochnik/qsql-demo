@@ -109,12 +109,23 @@ def run(
     """Compile and run cells in dependency order, landing each via its sink."""
     project = _project(file, set_, plugins)
     try:
-        results = run_project(project, select=list(select) if select else None)
+        results = run_project(
+            project, select=list(select) if select else None, on_event=_live_event
+        )
     except QsqlError as exc:
         typer.secho(str(exc), fg="red")
         raise typer.Exit(1)
     if _print_results(results):
         raise typer.Exit(1)
+
+
+def _live_event(event) -> None:
+    """Stream run progress; results get their green/red summary from
+    _print_results, so only the in-flight kinds print here."""
+    if event.kind in ("cell_started", "cell_step"):
+        typer.secho(f"  {event.line()}", dim=True)
+    elif event.kind == "note":
+        typer.secho(f"  {event.line()}", fg="yellow")
 
 
 @app.command("list")
@@ -208,7 +219,9 @@ def watch(
     _project(file, set_, plugins)  # load plugins + fail fast on compile errors
     typer.echo(f"watching {file} — Ctrl+C to stop")
     try:
-        for project, event in watch_events(file, overrides=gather_overrides(list(set_ or []))):
+        for project, event in watch_events(
+            file, overrides=gather_overrides(list(set_ or [])), on_event=_live_event
+        ):
             if project is None:
                 typer.secho(f"  compile error: {event}", fg="red")
             elif event:

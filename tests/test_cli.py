@@ -149,3 +149,11 @@ def test_qsqlrc_next_to_file_autoloads(tmp_path) -> None:
     f.write_text(GREETING_FILE)
     result = runner.invoke(app, ["run", str(f)])
     assert result.exit_code == 0, result.output
+
+
+def test_run_streams_progress_lines(tmp_path) -> None:
+    f = _init(tmp_path)
+    result = runner.invoke(app, ["run", str(f)])
+    assert result.exit_code == 0, result.output
+    assert "users: executing on duckdb" in result.output
+    assert "landing via parquet" in result.output
