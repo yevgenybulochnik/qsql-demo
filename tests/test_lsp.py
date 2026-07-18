@@ -148,6 +148,25 @@ def test_diagnostics_surface_sqlglot_syntax_errors(tmp_path) -> None:
     assert any(d.source == "sqlglot" for d in diags)
 
 
+def test_diagnostics_warn_on_repeated_directive_keys(tmp_path) -> None:
+    """A repeated `input:` silently replaces the earlier one (the demo-file
+    footgun) — the LSP must flag the later occurrence with a warning."""
+    from quicksql.lsp.analysis import Analyzer
+
+    text = (
+        "/*@ input: { bigquery: { project: p } } */\n"
+        "/*@ input: { postgres: { dsn: 'postgresql://u@h/db' } } */\n"
+        "-- @engine: bigquery\n"
+        "-- @cell a\nSELECT 1;\n"
+    )
+    diags = Analyzer().diagnostics(text, tmp_path)
+    dups = [d for d in diags if "repeated" in d.message]
+    assert len(dups) == 1
+    assert dups[0].severity == "warning" and dups[0].source == "quicksql"
+    assert dups[0].line == 1  # the *second* occurrence (0-indexed row)
+    assert "input" in dups[0].message and "line 2" in dups[0].message
+
+
 # ---------- analysis.py: googlesql-backed bigquery diagnostics ----------
 
 # body line 1 = file line 3; `|> SET` is valid BigQuery that sqlglot rejects

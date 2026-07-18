@@ -117,3 +117,24 @@ def test_unterminated_block_directive_raises() -> None:
 def test_single_line_block_directive() -> None:
     blocks = parse_text("-- @cell a\n/*@ vars: { x: 1 } */\nSELECT {{ var('x') }};")
     assert blocks[1].directives["vars"] == {"x": 1}
+
+
+def test_repeated_directive_keys_are_recorded_as_duplicates() -> None:
+    text = (
+        "-- @engine: duckdb\n"
+        "/*@ input: { bigquery: { project: p } } */\n"
+        "/*@ input: { postgres: { dsn: x } } */\n"
+        "-- @cell a\n"
+        "-- @sink: { type: parquet }\n"
+        "SELECT 1;\n"
+        "-- @sink: { type: duckdb, path: w.db }\n"
+    )
+    header, cell = parse_text(text)
+    assert header.duplicates == [("input", 2, 3)]
+    assert header.directives["input"] == {"postgres": {"dsn": "x"}}  # last wins
+    assert cell.duplicates == [("sink", 5, 7)]
+
+
+def test_unrepeated_directives_record_no_duplicates() -> None:
+    header, cell = parse_text("-- @engine: duckdb\n-- @cell a\nSELECT 1;\n")
+    assert header.duplicates == [] and cell.duplicates == []
