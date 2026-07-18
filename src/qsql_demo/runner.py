@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import duckdb
 import polars as pl
 
-from .models import RenderedCell, RunContext, RunResult
+from .models import RenderedCell, RunContext, RunEvent, RunResult
 from .registry import EXECUTORS, PLUGINS
 from .sinks import make_sink
 
@@ -43,10 +43,13 @@ def _load_extension(conn: Any, ext: str) -> None:
         conn.execute(f"LOAD {ext}")
 
 
-def _load_ext_cached(ctx: RunContext, ext: str) -> None:
-    if ext not in ctx.ext_cache:
-        _load_extension(ctx.conn, ext)
-        ctx.ext_cache.add(ext)
+def _load_ext_cached(ctx: RunContext, ext: str, cell: str | None = None) -> None:
+    if ext in ctx.ext_cache:
+        return
+    # first load per session — may INSTALL (the slow, network path)
+    ctx.emit("cell_step", cell, f"loading duckdb extension {ext}")
+    _load_extension(ctx.conn, ext)
+    ctx.ext_cache.add(ext)
 
 
 class RunSession:
@@ -136,20 +139,25 @@ def base_runner(project: Project) -> Inner:
         try:
             # cell-declared extensions load via the Extensions plugin's
             # before_execute; sinks are core mechanism, so theirs load here
+            ctx.emit("cell_step", cell.name, "preparing sinks")
             sink = make_sink(cell.config, ctx.root)
             for ext in sink.requires:
-                _load_ext_cached(ctx, ext)
+                _load_ext_cached(ctx, ext, cell.name)
             for upstream in cell.depends_on:
                 up_sink = make_sink(project.cells[upstream].config, ctx.root)
                 for ext in up_sink.requires:
-                    _load_ext_cached(ctx, ext)
+                    _load_ext_cached(ctx, ext, cell.name)
                 up_sink.prepare(ctx.conn)
             sink.prepare(ctx.conn)
+            ctx.emit("cell_step", cell.name, f"executing on {cell.engine}")
             view = EXECUTORS.get(cell.engine).execute(cell, ctx)
             if cell.reffed_in_context and ctx.session is not None:
                 ctx.session.materialized.add(cell.name)
+                ctx.emit("cell_step", cell.name, "materialized temp for downstream refs")
+            ctx.emit("cell_step", cell.name, f"landing via {cell.sink_type}")
             rows, target = sink.write(cell, view, ctx.conn)
             preview = _preview(ctx.conn, sink.ref_expr(cell.name))
+            ctx.emit("cell_step", cell.name, f"preview cached ({preview.height} rows)")
             return RunResult(
                 cell=cell.name,
                 ok=True,
@@ -188,6 +196,7 @@ def run_project(
     select: list[str] | None = None,
     closure: bool = True,
     session: RunSession | None = None,
+    on_event: Callable[[RunEvent], None] | None = None,
 ) -> list[RunResult]:
     owns_session = session is None
     session = session or RunSession()
@@ -199,22 +208,37 @@ def run_project(
         tmpdir=session.tmpdir,
         ext_cache=session.loaded_extensions,
         session=session,
+        on_event=on_event,
     )
     chain = build_chain(project)
     names = _selection(project, select, closure)
     if select is not None and not closure:
         names = _expand_missing_temps(project, names, session)
     results: list[RunResult] = []
+    run_started = time.perf_counter()
     try:
+        ctx.emit("run_started", detail=f"{len(names)} cell(s): {', '.join(names)}")
         _notify(ctx, "before_run", lambda p: p.before_run(project, ctx))
         for name in names:
             cell = project.cells[name]
+            ctx.emit("cell_started", name, f"{cell.engine} → {cell.sink_type}")
             try:
                 result = chain(cell, ctx)
             except Exception:  # a buggy plugin must not kill the run
                 result = RunResult(cell=name, ok=False, error=traceback.format_exc())
             results.append(result)
+            ctx.emit("cell_finished", name, result=result)
         _notify(ctx, "after_run", lambda p: p.after_run(project, results))
+        # snapshot: a failing on_event appends to ctx.log, so iterating the
+        # live list would grow it forever
+        for line in list(ctx.log):  # plugin lifecycle failures were invisible before
+            ctx.emit("note", detail=line)
+        failed = sum(1 for r in results if not r.ok)
+        ctx.emit(  # terminal: consumers may stop listening after this
+            "run_finished",
+            detail=f"{len(results) - failed} ok, {failed} failed"
+            f" in {time.perf_counter() - run_started:.1f}s",
+        )
     finally:
         session.tmpdir = ctx.tmpdir  # adopt a lazily-created temp dir
         if owns_session:

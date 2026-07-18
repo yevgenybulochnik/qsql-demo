@@ -299,3 +299,118 @@ def test_emit_sql_plugin_writes_rendered_sql(tmp_path) -> None:
     )
     assert project.run()[0].ok
     assert (tmp_path / "build" / "sql" / "a.sql").read_text().strip() == "SELECT 1 AS x;"
+
+
+# ---------- run events: live started/step/finished stream ----------
+
+
+def test_on_event_streams_the_cell_lifecycle_in_order(tmp_path) -> None:
+    from qsql_demo.models import RunEvent
+
+    project = compile_text(
+        "-- @cell users\nSELECT * FROM range(3) t(user_id);\n"
+        "-- @cell active\nSELECT * FROM {{ ref('users') }} WHERE user_id > 0;",
+        root=tmp_path,
+    )
+    events: list[RunEvent] = []
+    results = run_project(project, on_event=events.append)
+    assert all(r.ok for r in results)
+
+    kinds = [e.kind for e in events]
+    assert kinds[0] == "run_started" and kinds[-1] == "run_finished"
+    assert "2 cell" in events[0].detail
+
+    # per cell: started -> fine-grained steps -> finished, in topo order
+    def cell_events(name):
+        return [e for e in events if e.cell == name]
+
+    for name in ("users", "active"):
+        seq = cell_events(name)
+        assert seq[0].kind == "cell_started"
+        assert "duckdb" in seq[0].detail and "parquet" in seq[0].detail
+        steps = [e.detail for e in seq if e.kind == "cell_step"]
+        assert any("executing on duckdb" in s for s in steps)
+        assert any("landing via parquet" in s for s in steps)
+        assert any("preview" in s for s in steps)
+        assert seq[-1].kind == "cell_finished"
+        assert seq[-1].result is not None and seq[-1].result.ok
+    # all users events precede all active events (topo order, no interleave)
+    assert events.index(cell_events("users")[-1]) < events.index(cell_events("active")[0])
+    assert "2 ok, 0 failed" in events[-1].detail
+
+
+def test_on_event_reports_failures_and_run_continues(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell bad\nSELECT * FROM missing_table;\n-- @cell good\nSELECT 1 AS x;",
+        root=tmp_path,
+    )
+    events = []
+    results = run_project(project, on_event=events.append)
+    finished = {e.cell: e.result for e in events if e.kind == "cell_finished"}
+    assert finished["bad"].ok is False and finished["good"].ok is True
+    assert [r.cell for r in results] == ["bad", "good"]
+    assert "1 ok, 1 failed" in [e for e in events if e.kind == "run_finished"][-1].detail
+
+
+def test_broken_event_callback_never_kills_the_run(tmp_path) -> None:
+    project = compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+
+    def boom(event) -> None:
+        raise RuntimeError("consumer bug")
+
+    results = run_project(project, on_event=boom)
+    assert len(results) == 1 and results[0].ok  # the run is unharmed
+
+
+def test_extension_load_step_is_attributed_to_the_cell(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell a\n-- @extensions: [json]\nSELECT 1 AS x;", root=tmp_path
+    )
+    events = []
+    assert run_project(project, on_event=events.append)[0].ok
+    loads = [
+        e
+        for e in events
+        if e.kind == "cell_step" and "loading duckdb extension json" in e.detail
+    ]
+    assert loads, [e.detail for e in events]
+    assert all(e.cell == "a" for e in loads)
+
+
+def test_plugin_lifecycle_failures_surface_as_notes_before_run_finished(tmp_path) -> None:
+    @plugin
+    class BrokenAfterRun(Plugin):
+        def after_run(self, project, results) -> None:
+            raise RuntimeError("observer bug")
+
+    project = compile_text("-- @cell a\nSELECT 1 AS x;", root=tmp_path)
+    events = []
+    assert run_project(project, on_event=events.append)[0].ok
+    kinds = [e.kind for e in events]
+    note = next(e for e in events if e.kind == "note" and "after_run failed" in e.detail)
+    assert kinds[-1] == "run_finished"  # run_finished stays the terminal event
+    assert events.index(note) < kinds.index("run_finished")
+
+
+def test_run_event_line_renders_each_kind() -> None:
+    from qsql_demo.models import RunEvent, RunResult
+
+    ok = RunResult(cell="a", ok=True, rows=3, elapsed=0.012, target="data/a.parquet")
+    assert RunEvent("cell_finished", "a", result=ok).line() == (
+        "a: ok — 3 rows in 12 ms -> data/a.parquet"
+    )
+    bad = RunResult(cell="a", ok=False, error="Traceback ...\nBinder Error: no table")
+    assert RunEvent("cell_finished", "a", result=bad).line() == (
+        "a: FAILED — Binder Error: no table"
+    )
+    assert RunEvent("cell_started", "a", "duckdb → parquet").line() == (
+        "a: started (duckdb → parquet)"
+    )
+    assert RunEvent("cell_step", "a", "executing on duckdb").line() == "a: executing on duckdb"
+    assert RunEvent("run_started", detail="2 cell(s): a, b").line() == "run started — 2 cell(s): a, b"
+    assert RunEvent("run_finished", detail="2 ok, 0 failed in 0.1s").line() == (
+        "run finished — 2 ok, 0 failed in 0.1s"
+    )
+    assert RunEvent("note", detail="plugin x after_run failed").line() == (
+        "note: plugin x after_run failed"
+    )

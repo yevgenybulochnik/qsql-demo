@@ -91,6 +91,39 @@ class RunResult:
         return self.preview
 
 
+@dataclass(frozen=True)
+class RunEvent:
+    """One moment of a run, streamed live to whoever passed ``on_event``.
+
+    Kinds: ``run_started`` | ``cell_started`` | ``cell_step`` |
+    ``cell_finished`` (carries the RunResult) | ``run_finished`` | ``note``.
+    """
+
+    kind: str
+    cell: str | None = None
+    detail: str = ""
+    result: RunResult | None = None
+
+    def line(self) -> str:
+        """One human-readable log line; the TUI log tab and CLI both use this."""
+        if self.kind == "cell_finished" and self.result is not None:
+            r = self.result
+            if r.ok:
+                rows = r.rows if r.rows is not None else "?"
+                return f"{self.cell}: ok — {rows} rows in {r.elapsed * 1000:.0f} ms -> {r.target}"
+            reason = (r.error or "unknown error").strip().splitlines()[-1]
+            return f"{self.cell}: FAILED — {reason}"
+        if self.kind == "cell_started":
+            return f"{self.cell}: started ({self.detail})"
+        if self.kind == "run_started":
+            return f"run started — {self.detail}"
+        if self.kind == "run_finished":
+            return f"run finished — {self.detail}"
+        if self.kind == "note":
+            return f"note: {self.detail}"
+        return f"{self.cell}: {self.detail}" if self.cell else self.detail
+
+
 @dataclass
 class RunContext:
     """Per-run state handed to executors, sinks, and plugin `run` hooks."""
@@ -103,3 +136,14 @@ class RunContext:
     tmpdir: str | None = None
     ext_cache: set[str] = field(default_factory=set)
     session: Any = None
+    on_event: Any = None  # Callable[[RunEvent], None] | None — set by run_project
+
+    def emit(self, kind: str, cell: str | None = None, detail: str = "", result: Any = None) -> None:
+        """Stream a RunEvent to the consumer; a broken callback lands in the
+        log instead of killing the run (events are observability, not control)."""
+        if self.on_event is None:
+            return
+        try:
+            self.on_event(RunEvent(kind=kind, cell=cell, detail=detail, result=result))
+        except Exception as exc:
+            self.log.append(f"on_event callback failed for {kind}: {exc}")

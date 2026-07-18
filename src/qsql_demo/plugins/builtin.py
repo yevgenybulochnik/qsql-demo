@@ -108,7 +108,7 @@ class Extensions(Plugin):
         from ..runner import _load_ext_cached
 
         for ext in cell.extensions:
-            _load_ext_cached(ctx, ext)
+            _load_ext_cached(ctx, ext, cell.name)
 
 
 @plugin
