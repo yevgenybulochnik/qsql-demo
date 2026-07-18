@@ -14,6 +14,14 @@ uv tool install 'quicksql[lsp]'      # or: pipx install 'quicksql[lsp]'
 uv run --extra lsp quicksql lsp           # runs the server on stdio
 ```
 
+## VS Code
+
+`vscode/` is a thin client extension: it declares the `qsql` language (with a
+TextMate grammar layering cell/directive/Jinja scopes over the built-in SQL
+grammar) and spawns `quicksql lsp` for qsql documents. Build with
+`npm install && npm run package`, install the resulting `.vsix` — see
+`vscode/README.md` for details, including the Remote-SSH note.
+
 ## Neovim
 
 `nvim/qsql.lua` is a self-contained client using the built-in `vim.lsp` (no
