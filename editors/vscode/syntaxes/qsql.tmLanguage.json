@@ -1,0 +1,92 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "quicksql",
+  "scopeName": "source.qsql",
+  "patterns": [
+    { "include": "#cell-marker" },
+    { "include": "#line-directive" },
+    { "include": "#block-directive" },
+    { "include": "#jinja-expression" },
+    { "include": "#jinja-statement" },
+    { "include": "#jinja-comment" },
+    { "include": "source.sql" }
+  ],
+  "repository": {
+    "cell-marker": {
+      "match": "^\\s*(--)\\s*(@cell)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*$",
+      "name": "meta.directive.cell.qsql",
+      "captures": {
+        "1": { "name": "punctuation.definition.comment.qsql" },
+        "2": { "name": "keyword.control.cell.qsql" },
+        "3": { "name": "entity.name.section.cell.qsql" }
+      }
+    },
+    "line-directive": {
+      "match": "^\\s*(--)\\s*(@[A-Za-z_][A-Za-z0-9_.]*)\\s*(:)(.*)$",
+      "name": "meta.directive.qsql",
+      "captures": {
+        "1": { "name": "punctuation.definition.comment.qsql" },
+        "2": { "name": "keyword.other.directive.qsql" },
+        "3": { "name": "punctuation.separator.key-value.qsql" },
+        "4": { "name": "string.unquoted.directive-value.qsql" }
+      }
+    },
+    "block-directive": {
+      "begin": "/\\*@",
+      "end": "\\*/",
+      "name": "meta.directive.block.qsql",
+      "contentName": "string.unquoted.directive-value.qsql",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.directive.begin.qsql" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.directive.end.qsql" }
+      }
+    },
+    "jinja-expression": {
+      "begin": "\\{\\{",
+      "end": "\\}\\}",
+      "name": "meta.embedded.jinja.expression.qsql",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.template-expression.begin.qsql" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.template-expression.end.qsql" }
+      },
+      "patterns": [{ "include": "#jinja-inner" }]
+    },
+    "jinja-statement": {
+      "begin": "\\{%",
+      "end": "%\\}",
+      "name": "meta.embedded.jinja.statement.qsql",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.template-statement.begin.qsql" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.template-statement.end.qsql" }
+      },
+      "patterns": [{ "include": "#jinja-inner" }]
+    },
+    "jinja-comment": {
+      "begin": "\\{#",
+      "end": "#\\}",
+      "name": "comment.block.jinja.qsql"
+    },
+    "jinja-inner": {
+      "patterns": [
+        {
+          "match": "\\b(ref|source|var|env)\\b(?=\\s*\\()",
+          "name": "support.function.jinja.qsql"
+        },
+        {
+          "match": "'[^']*'",
+          "name": "string.quoted.single.jinja.qsql"
+        },
+        {
+          "match": "\"[^\"]*\"",
+          "name": "string.quoted.double.jinja.qsql"
+        }
+      ]
+    }
+  }
+}

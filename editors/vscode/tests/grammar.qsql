@@ -1,0 +1,23 @@
+-- SYNTAX TEST "source.qsql"
+
+-- @engine: duckdb
+-- ^^^^^^^ keyword.other.directive.qsql
+--        ^ punctuation.separator.key-value.qsql
+--          ^^^^^^ string.unquoted.directive-value.qsql
+
+-- @cell orders
+-- ^^^^^ keyword.control.cell.qsql
+--       ^^^^^^ entity.name.section.cell.qsql
+
+/*@
+engine: postgres
+-- ^^^^^^^^^^^^^ meta.directive.block.qsql string.unquoted.directive-value.qsql
+*/
+
+select * from {{ ref('orders') }}
+--            ^^ punctuation.definition.template-expression.begin.qsql
+--               ^^^^^^^^^^^^^ meta.embedded.jinja.expression.qsql
+--                             ^^ punctuation.definition.template-expression.end.qsql
+
+{% if flag %}
+-- ^^^^^^^ meta.embedded.jinja.statement.qsql
