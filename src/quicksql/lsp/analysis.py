@@ -76,7 +76,10 @@ class Analyzer:
             return [_line_diag(text, _line_in(str(exc)), str(exc))]
         except (CycleError, QsqlError) as exc:
             return [_line_diag(text, 1, str(exc))]
-        diags: list[Diagnostic] = []
+        diags: list[Diagnostic] = [
+            _line_diag(text, line, message, "warning")
+            for line, message in project.warnings
+        ]
         for cell in project.cells.values():
             diags.extend(_syntax_diagnostics(cell, self._gsql_bin))
         return diags

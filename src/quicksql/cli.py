@@ -77,7 +77,10 @@ def _project(file: Path, sets: list[str] | None, plugins: list[str] | None) -> P
             _load_plugin_module(str(rc))
         for spec in plugins or []:
             _load_plugin_module(spec)
-        return compile_file(file, overrides=gather_overrides(list(sets or [])))
+        project = compile_file(file, overrides=gather_overrides(list(sets or [])))
+        for line, message in project.warnings:
+            typer.secho(f"warning: {message}", fg="yellow", err=True)
+        return project
     except QsqlError as exc:
         typer.secho(str(exc), fg="red")
         raise typer.Exit(1)

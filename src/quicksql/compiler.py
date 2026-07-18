@@ -37,6 +37,9 @@ class Project:
     cells: dict[str, RenderedCell]
     order: list[str]
     overrides: dict[str, Any] = field(default_factory=dict)
+    # (1-indexed line, message) for non-fatal compile findings, e.g. a
+    # directive key repeated within a block (later silently won)
+    warnings: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def edges(self) -> dict[str, list[str]]:
@@ -145,6 +148,16 @@ def compile_text(
         cell.reffed_in_context = cell.name in referenced_in_context
 
     order = topo_sort(list(cells), {n: c.depends_on for n, c in cells.items()})
+    warnings = [
+        (
+            later,
+            f"directive {key!r} at line {later} replaces the one at line {earlier} "
+            "(repeated within a block: later wins; merge strategies apply between "
+            "global/cell/override layers, not repeated keys)",
+        )
+        for block in blocks
+        for key, earlier, later in block.duplicates
+    ]
     project = Project(
         root=root,
         path=path,
@@ -153,6 +166,7 @@ def compile_text(
         cells=cells,
         order=order,
         overrides=overrides,
+        warnings=warnings,
     )
     for plug in PLUGINS.overriding("after_compile"):
         plug.after_compile(project)  # a validation seam: raising rejects the compile

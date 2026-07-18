@@ -50,6 +50,17 @@ class _Block:
         self.line = line
         self.directives: dict[str, Any] = {}
         self.sql_lines: list[str] = []
+        self._directive_lines: dict[str, int] = {}  # key -> line it last won at
+        self.duplicates: list[tuple[str, int, int]] = []  # (key, earlier, later)
+
+    def add_directives(self, data: dict[str, Any], line: int) -> None:
+        """Merge one directive run; a repeated key silently last-wins, so
+        record the collision for downstream warnings."""
+        for key, value in data.items():
+            if key in self.directives:
+                self.duplicates.append((key, self._directive_lines[key], line))
+            self.directives[key] = value
+            self._directive_lines[key] = line
 
     def finish(self, line_end: int, lines: list[str]) -> RawBlock:
         return RawBlock(
@@ -59,6 +70,7 @@ class _Block:
             line=self.line,
             line_end=line_end,
             source="\n".join(lines[self.line - 1 : line_end]),
+            duplicates=self.duplicates,
         )
 
 
@@ -73,7 +85,7 @@ def parse_text(text: str) -> list[RawBlock]:
     def flush_group() -> None:
         nonlocal group
         if group:
-            blocks[-1].directives.update(_parse_yaml("\n".join(group), group_line))
+            blocks[-1].add_directives(_parse_yaml("\n".join(group), group_line), group_line)
             group = []
 
     i = 0
@@ -110,7 +122,7 @@ def parse_text(text: str) -> list[RawBlock]:
                     raise ParseError(f"unterminated /*@ block at line {start + 1}")
                 body.append(lines[i])
             body[-1] = body[-1][: body[-1].index("*/")]
-            blocks[-1].directives.update(_parse_yaml("\n".join(body), start + 1))
+            blocks[-1].add_directives(_parse_yaml("\n".join(body), start + 1), start + 1)
             i += 1
             continue
         blocks[-1].sql_lines.append(line)

@@ -38,6 +38,9 @@ class RawBlock:
     line: int
     line_end: int = 0
     source: str = ""
+    # repeated directive keys in this block: (key, earlier_line, later_line);
+    # the later value silently won — recorded so consumers can warn
+    duplicates: list[tuple[str, int, int]] = field(default_factory=list)
 
 
 @dataclass
