@@ -18,6 +18,7 @@ _KIND = {
     "field": types.CompletionItemKind.Field,
     "reference": types.CompletionItemKind.Reference,
     "keyword": types.CompletionItemKind.Keyword,
+    "table": types.CompletionItemKind.Struct,
 }
 _SEVERITY = {
     "error": types.DiagnosticSeverity.Error,

@@ -42,7 +42,11 @@ highlighting), then starts `quicksql lsp` for each buffer, rooted at the nearest
   directive YAML, cycles, and per-dialect SQL syntax errors.
 - **Completion** (omnifunc `<C-x><C-o>`, or any LSP completion plugin): columns of
   the tables/`ref()`/`source()` in the cell — alias-scoped (`m.` → that table's
-  columns) via sqlglot; plus `ref('…')` cell names and SQL keywords.
+  columns) via sqlglot; plus `ref('…')` cell names and SQL keywords. In bigquery
+  cells, `FROM `/`JOIN ` also complete relation paths: datasets, then
+  `dataset.` → its tables, `project.dataset.` → that project's tables
+  (`other-proj.` → that project's datasets). Project IDs themselves can't be
+  listed — no BigQuery API enumerates them.
 - **Go-to-definition** on a `ref('cell')` jumps to that cell; **document symbols**
   outline the cells.
 

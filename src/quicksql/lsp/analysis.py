@@ -20,10 +20,13 @@ from ..compiler import compile_text
 from ..errors import ConfigErrorGroup, CycleError, ParseError as QsqlParseError, QsqlError
 from .googlesql import find_execute_query, parse_errors
 from .mask import Ref, Source, mask_jinja
-from .schema import SchemaCache, columns_for
+from .schema import SchemaCache, columns_for, relation_names
 
 # quicksql engine names line up with sqlglot dialect names
 _DIALECT = {"duckdb": "duckdb", "postgres": "postgres", "sqlite": "sqlite", "bigquery": "bigquery"}
+
+# cursor in table-reference position: FROM/JOIN + partial dotted path
+_TABLE_POS = re.compile(r"\b(?:from|join)\s+`?([\w.\-]*)$", re.IGNORECASE)
 
 _KEYWORDS = [
     "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET",
@@ -98,8 +101,19 @@ class Analyzer:
                     for name in project.order
                 ]
 
-        items = [Completion(k, "keyword") for k in _KEYWORDS]
         cell = _cell_at(project, line + 1) if project is not None else None
+
+        if cell is not None:
+            # table-reference position: FROM / JOIN followed by a partial
+            # (possibly backticked, dotted) relation path
+            tbl = _TABLE_POS.search(prefix)
+            if tbl is not None:
+                segments = tbl.group(1).split(".")[:-1]  # done segments only
+                names = relation_names(project, cell, segments, self.cache)
+                if names:
+                    return [Completion(n, "table", detail) for n, detail in names]
+
+        items = [Completion(k, "keyword") for k in _KEYWORDS]
         if cell is None:
             return items
 

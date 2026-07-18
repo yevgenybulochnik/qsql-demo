@@ -136,6 +136,45 @@ def table_columns(project: Any, cell: Any, name: str) -> list[Column]:
     return _cols(frame) if frame is not None else []
 
 
+def relation_names(
+    project: Any, cell: Any, parts: list[str], cache: SchemaCache | None = None
+) -> list[Column]:
+    """Completion candidates for the next segment of a partial dotted relation
+    in a bigquery cell (v1: other engines return []): with no typed segments,
+    the context's datasets; with one, that dataset's tables — falling back to
+    the *project* of that name's datasets when it isn't a dataset; with two
+    (project.dataset.), that project's dataset's tables."""
+    if cell.engine != "bigquery" or len(parts) > 2:
+        return []
+    spec = (cell.config.input or {}).get("bigquery") or {}
+    key = ("relations", getattr(cell, "context", ""), tuple(parts))
+
+    def datasets(s: dict) -> list[Column]:
+        frame = catalog.bigquery_context_node(s).load()
+        return [(d, "dataset") for d in frame["dataset"].to_list()]
+
+    def tables(s: dict, ds: str) -> list[Column]:
+        frame = catalog.bigquery_context_node(s).child({"dataset": ds}).load()
+        return [
+            (row["table"], row["type"] or "table") for row in frame.iter_rows(named=True)
+        ]
+
+    def compute() -> list[Column]:
+        try:
+            if len(parts) == 0:
+                return datasets(spec)
+            if len(parts) == 2:
+                return tables({**spec, "project": parts[0]}, parts[1])
+            try:
+                return tables(spec, parts[0])
+            except Exception:
+                return datasets({**spec, "project": parts[0]})
+        except Exception:
+            return []  # unreachable dataset/project: best effort, no names
+
+    return cache.get(key, compute) if cache is not None else compute()
+
+
 def columns_for(
     project: Any, cell: Any, relation: Any, cache: SchemaCache | None = None
 ) -> list[Column]:
