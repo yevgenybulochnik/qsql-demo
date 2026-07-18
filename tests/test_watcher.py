@@ -96,3 +96,26 @@ def test_config_only_edits_do_not_trigger(tmp_path) -> None:
     f.write_text(V1.replace("-- @autorun: false", "-- @autorun: true"))
     project, results = run_changed(f, hashes)
     assert results == []
+
+
+def test_run_changed_streams_run_events(tmp_path) -> None:
+    f = tmp_path / "base.sql"
+    f.write_text(V1)
+    hashes = hashes_of(compile_file(f))
+    f.write_text(V2)
+    events = []
+    _, results = run_changed(f, hashes, on_event=events.append)
+    assert [r.cell for r in results] == ["a", "b"]
+    assert [e.cell for e in events if e.kind == "cell_started"] == ["a", "b"]
+
+
+def test_config_only_edit_is_detected_but_not_rerun(tmp_path) -> None:
+    from qsql_demo.watcher import config_only_changes
+
+    f = tmp_path / "base.sql"
+    f.write_text(V1)
+    old = compile_file(f)
+    f.write_text(V1.replace("-- @cell c\n", "-- @cell c\n-- @output: { type: duckdb }\n"))
+    new = compile_file(f)
+    assert config_only_changes(old, new) == ["c"]
+    assert plan_rerun(hashes_of(old), new) == []  # body hash is blind to config edits

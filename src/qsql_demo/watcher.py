@@ -7,12 +7,12 @@ reruns (known limitation). Cells with autorun:false are skipped.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from .compiler import Project, compile_file
 from .errors import QsqlError
 from .graph import downstream
-from .models import RunResult
+from .models import RunEvent, RunResult
 from .runner import RunSession, run_project
 
 
@@ -46,16 +46,31 @@ def plan_rerun(old_hashes: dict[str, str], project: Project) -> list[str]:
     return [n for n in targets if should_rerun(project.cells[n])]
 
 
+def config_only_changes(old: Project, new: Project) -> list[str]:
+    """Cells whose SQL body is unchanged but whose config differs — the body
+    hash is blind to these, so no rerun fires; surface them in logs instead.
+    Compared via model_dump: each compile composes a fresh CellConfig class,
+    so pydantic instance equality is always False across compiles."""
+    return [
+        n
+        for n, c in new.cells.items()
+        if n in old.cells
+        and old.cells[n].hash == c.hash
+        and old.cells[n].config.model_dump() != c.config.model_dump()
+    ]
+
+
 def run_changed(
     path: Path | str,
     old_hashes: dict[str, str],
     overrides: dict[str, Any] | None = None,
     session: RunSession | None = None,
+    on_event: Callable[[RunEvent], None] | None = None,
 ) -> tuple[Project, list[RunResult]]:
     project = compile_file(path, overrides)
     to_run = plan_rerun(old_hashes, project)
     results = (
-        run_project(project, select=to_run, closure=False, session=session)
+        run_project(project, select=to_run, closure=False, session=session, on_event=on_event)
         if to_run
         else []
     )
@@ -66,11 +81,13 @@ def watch_events(
     path: Path | str,
     overrides: dict[str, Any] | None = None,
     stop_event: Any = None,
+    on_event: Callable[[RunEvent], None] | None = None,
 ) -> Iterator[tuple[Project | None, list[RunResult] | QsqlError]]:
     """Initial full autorun pass, then one event per file save.
 
     Yields (project, results); on compile failure yields (None, error) and
-    keeps watching. Pass a threading.Event as stop_event to end the loop.
+    keeps watching. Pass a threading.Event as stop_event to end the loop;
+    pass on_event to stream RunEvents (plus config-only-change notes) live.
     """
     import watchfiles
 
@@ -80,7 +97,7 @@ def watch_events(
         project = compile_file(path, overrides)
         autorun = [n for n in project.order if should_rerun(project.cells[n])]
         results = (
-            run_project(project, select=autorun, closure=False, session=session)
+            run_project(project, select=autorun, closure=False, session=session, on_event=on_event)
             if autorun
             else []
         )
@@ -89,11 +106,20 @@ def watch_events(
         for changes in watchfiles.watch(path.parent, stop_event=stop_event):
             if not touches(changes, path):
                 continue
+            previous = project
             try:
-                project, results = run_changed(path, hashes, overrides, session=session)
+                project, results = run_changed(
+                    path, hashes, overrides, session=session, on_event=on_event
+                )
             except QsqlError as exc:
                 yield None, exc
                 continue
+            if on_event is not None:
+                cfg_only = config_only_changes(previous, project)
+                if cfg_only:
+                    on_event(
+                        RunEvent("note", detail=f"config changed (no rerun): {', '.join(cfg_only)}")
+                    )
             hashes = hashes_of(project)
             yield project, results
     finally:
