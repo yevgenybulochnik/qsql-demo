@@ -252,8 +252,10 @@ def _resolve_scope(project: Any, cell: Any, source: str | None = None) -> dict[s
             continue
         if table.name in by_placeholder:  # a {{ ref/source }} placeholder
             scope[key] = by_placeholder[table.name]
-        else:  # engine-native table, keep any schema qualifier
-            scope[key] = f"{table.db}.{table.name}" if table.db else table.name
+        else:  # engine-native table, keep catalog (bigquery project) and
+            # schema qualifiers
+            qualified = [table.catalog, table.db, table.name]
+            scope[key] = ".".join(part for part in qualified if part)
     # a CTE's columns are its projection — statically known, overriding the
     # bare table-name entry its FROM reference produced
     from .schema import Projection

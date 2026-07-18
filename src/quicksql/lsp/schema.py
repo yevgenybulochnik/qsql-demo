@@ -117,6 +117,10 @@ def _table_frame(project: Any, cell: Any, name: str) -> pl.DataFrame | None:
             leaf = root.child({"table": table})
         elif engine == "bigquery":
             spec = (cell.config.input or {}).get("bigquery") or {}
+            if len(parts) >= 3:
+                # project.dataset.table — introspect that project, not the
+                # spec's default (endpoint etc. carry over)
+                root = catalog.bigquery_context_node({**spec, "project": parts[-3]})
             dataset = parts[-2] if len(parts) >= 2 else spec.get("dataset")
             mid = root.child({"dataset": dataset}) if dataset else None
             leaf = mid.child({"table": table}) if mid and mid.child else None
