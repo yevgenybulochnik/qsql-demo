@@ -221,6 +221,25 @@ def test_googlesql_real_binary_parses_pipe_syntax(tmp_path, monkeypatch) -> None
     assert Analyzer().diagnostics(text, tmp_path) == []
 
 
+def test_completion_alias_scope_survives_unsupported_pipe_operators(tmp_path) -> None:
+    """sqlglot can't parse `|> SET`, but _resolve_scope parses at
+    ErrorLevel.IGNORE and the partial tree still carries the FROM tables —
+    alias-scoped column completion must keep working in such cells."""
+    import polars as pl
+
+    from quicksql.lsp.analysis import Analyzer
+
+    (tmp_path / "data").mkdir()
+    pl.DataFrame({"x": [1], "y": [2]}).write_parquet(tmp_path / "data" / "up.parquet")
+    text = (
+        "-- @engine: bigquery\n"
+        "-- @cell up\nSELECT 1 AS x, 2 AS y\n"
+        "-- @cell down\nFROM {{ ref('up') }} AS o\n|> SET x = 9\n|> WHERE o.\n"
+    )
+    comps = Analyzer().completions(text, tmp_path, 6, len("|> WHERE o."))
+    assert [c.label for c in comps if c.kind == "field"] == ["x", "y"]
+
+
 def _land_users(tmp_path, text):
     from quicksql.runner import run_project
 

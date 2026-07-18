@@ -71,6 +71,8 @@ implements the actual BigQuery grammar:
 
 When discoverable, all `@engine: bigquery` cells' syntax diagnostics come from
 googlesql (source `googlesql` in the editor) with sqlglot as the fallback.
-Parse-only: table names aren't resolved, and completions still use sqlglot, so
-a cell using one of the six operators above loses alias-scoped column
-completion.
+Parse-only: table names aren't resolved. Completions still use sqlglot, whose
+error-tolerant parse keeps alias-scoped column completion working even in
+cells with the six operators above; as everywhere else, completion offers the
+upstream relation's columns statically — it doesn't track pipe projections, so
+a column dropped or renamed mid-pipe is still offered under its original name.
