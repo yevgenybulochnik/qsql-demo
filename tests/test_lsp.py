@@ -252,6 +252,105 @@ def test_completion_alias_scopes_to_a_fake_bigquery_table(tmp_path, monkeypatch)
     assert "event_id" in fields and "name" in fields
 
 
+def _relation_fake_client(monkeypatch, projects_seen):
+    """FakeClient serving datasets p:{analytics,staging} / other-proj:{ds1},
+    tables analytics:{events,users}; records which project each call used."""
+    from types import SimpleNamespace
+
+    from quicksql.executors.bigquery_exec import BigQueryExecutor
+
+    datasets = {"p": ["analytics", "staging"], "other-proj": ["ds1"]}
+
+    def make(self, spec):
+        class FakeClient:
+            def list_datasets(self):
+                projects_seen.append(("datasets", spec.get("project")))
+                return [
+                    SimpleNamespace(dataset_id=d)
+                    for d in datasets.get(spec.get("project"), [])
+                ]
+
+            def list_tables(self, ds):
+                projects_seen.append(("tables", spec.get("project")))
+                if spec.get("project") != "p" or ds != "analytics":
+                    raise RuntimeError(f"unknown dataset {ds}")
+                return [
+                    SimpleNamespace(table_id="events", table_type="TABLE"),
+                    SimpleNamespace(table_id="users", table_type="VIEW"),
+                ]
+
+        return FakeClient()
+
+    monkeypatch.setattr(BigQueryExecutor, "make_client", make)
+
+
+def test_completion_offers_datasets_after_from(tmp_path, monkeypatch) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    seen: list = []
+    _relation_fake_client(monkeypatch, seen)
+    text = "-- @input: { bigquery: { project: p } }\n-- @cell c\nSELECT 1 FROM \n"
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT 1 FROM "))
+    assert [c.label for c in comps if c.kind == "table"] == ["analytics", "staging"]
+
+
+def test_completion_offers_tables_after_a_dataset_dot(tmp_path, monkeypatch) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    seen: list = []
+    _relation_fake_client(monkeypatch, seen)
+    text = "-- @input: { bigquery: { project: p } }\n-- @cell c\nSELECT 1 FROM analytics.\n"
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT 1 FROM analytics."))
+    got = [(c.label, c.detail) for c in comps if c.kind == "table"]
+    assert got == [("events", "TABLE"), ("users", "VIEW")]
+
+
+def test_completion_falls_back_to_a_projects_datasets(tmp_path, monkeypatch) -> None:
+    """`FROM other-proj.` — not a dataset of the default project, so offer
+    that *project's* datasets instead."""
+    from quicksql.lsp.analysis import Analyzer
+
+    seen: list = []
+    _relation_fake_client(monkeypatch, seen)
+    text = "-- @input: { bigquery: { project: p } }\n-- @cell c\nSELECT 1 FROM other-proj.\n"
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT 1 FROM other-proj."))
+    assert [c.label for c in comps if c.kind == "table"] == ["ds1"]
+    assert ("datasets", "other-proj") in seen
+
+
+def test_completion_offers_cross_project_tables_inside_backticks(
+    tmp_path, monkeypatch
+) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    seen: list = []
+    _relation_fake_client(monkeypatch, seen)
+    # `p.analytics.` spelled fully — three segments means project.dataset.
+    text = (
+        "-- @input: { bigquery: { project: whatever } }\n"
+        "-- @cell c\nSELECT 1 FROM `p.analytics.\n"
+    )
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT 1 FROM `p.analytics."))
+    assert [c.label for c in comps if c.kind == "table"] == ["events", "users"]
+    assert ("tables", "p") in seen
+
+
+@pytest.mark.bigquery
+def test_completion_offers_emulator_datasets_and_tables(tmp_path, bq_emulator) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    text = (
+        f"-- @input: {{ bigquery: {{ project: quicksql-test, endpoint: {bq_emulator} }} }}\n"
+        "-- @cell c\nSELECT 1 FROM analytics.\n"
+    )
+    a = Analyzer()
+    comps = a.completions(text, tmp_path, 2, len("SELECT 1 FROM analytics."))
+    assert "events" in [c.label for c in comps if c.kind == "table"]
+    text2 = text.replace("FROM analytics.", "FROM ")
+    comps = a.completions(text2, tmp_path, 2, len("SELECT 1 FROM "))
+    assert "analytics" in [c.label for c in comps if c.kind == "table"]
+
+
 def test_completion_uses_the_query_project_for_cross_project_tables(
     tmp_path, monkeypatch
 ) -> None:
