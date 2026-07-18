@@ -39,7 +39,9 @@ first `@cell`) inherited by every cell.
   per-field merge strategy (OVERRIDE / DEEP / EXTEND). Config values are literal; Jinja
   applies to SQL bodies only.
 - **Watch/TUI are reflect-only.** The file is edited elsewhere; change detection hashes
-  SQL bodies only, so config-only edits don't trigger reruns (known limitation).
+  SQL bodies only, so config-only edits don't trigger reruns (known limitation; the
+  watch/TUI log flags them as `config changed (no rerun)` via
+  `watcher.config_only_changes`).
   Third-party plugins load via `--plugins mod.or.path.py` or a `qsqlrc.py` next to the file.
 
 ## Commands
@@ -83,6 +85,21 @@ Write the failing pytest first and watch it fail **for the expected reason**; wr
 minimal code to green; refactor while green. Tests mirror `src/` layout
 (`tests/test_<module>.py`); shared fixtures in `tests/conftest.py` (registry
 snapshot/restore is autouse — tests may register scratch plugins freely).
+
+## Gotchas
+
+- **Never iterate `ctx.log` directly while emitting into it.** `RunContext.emit` handles a
+  failing `on_event` callback by appending an error line to `ctx.log`; the end-of-run flush
+  in `run_project` (`for line in ...: ctx.emit("note", ...)`) therefore fed its own appends
+  back into the loop — with an always-raising callback
+  (`test_broken_event_callback_never_kills_the_run`) it grew unboundedly (~7GB) and the
+  kernel OOM killer took down the whole tmux pane scope, Claude session included, three
+  times on 2026-07-18. Fixed in `runner.py` by iterating a snapshot:
+  `for line in list(ctx.log)`. Keep that pattern for any loop that emits while reading the log.
+- **This box has 7.5GiB RAM and no swap.** Run memory-risky commands (e.g. the full pytest
+  suite) under `systemd-run --user --scope -p MemoryMax=3G <cmd>` so a runaway process is
+  killed instead of the session. Don't use `ulimit -v`: polars/duckdb reserve large virtual
+  address arenas and abort under address-space caps.
 
 ## Conventional Commits
 
