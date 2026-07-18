@@ -127,6 +127,36 @@ def test_bigquery_executor_with_fake_client(ctx, monkeypatch) -> None:
     assert ctx.conn.sql(f'SELECT count(*) FROM "{view}"').fetchone() == (2,)
 
 
+def test_bigquery_make_client_honors_emulator_endpoint() -> None:
+    """An `endpoint` in the input spec points the client at an emulator: no
+    real credentials, no ADC lookup."""
+    pytest.importorskip(
+        "google.cloud.bigquery", reason="needs the 'bigquery' extra"
+    )
+    from google.auth.credentials import AnonymousCredentials
+
+    client = BigQueryExecutor().make_client(
+        {"project": "p", "endpoint": "http://localhost:9050"}
+    )
+    assert client._connection.API_BASE_URL == "http://localhost:9050"
+    assert isinstance(client._credentials, AnonymousCredentials)
+
+
+@pytest.mark.bigquery
+def test_bigquery_cell_runs_against_the_emulator(tmp_path, bq_emulator) -> None:
+    from quicksql.compiler import compile_text
+
+    project = compile_text(
+        f"/*@ input: {{ bigquery: {{ project: quicksql-test, endpoint: {bq_emulator} }} }} */\n"
+        "-- @cell nums\nSELECT 1 AS n UNION ALL SELECT 2 AS n;\n",
+        root=tmp_path,
+    )
+    results = {r.cell: r for r in project.run()}
+    assert results["nums"].ok, results["nums"].error
+    landed = pl.read_parquet(tmp_path / "data" / "nums.parquet")
+    assert sorted(landed["n"].to_list()) == [1, 2]
+
+
 class FakePgCursor:
     """Stands in for a psycopg cursor: .description (objects with .name) + rows."""
 

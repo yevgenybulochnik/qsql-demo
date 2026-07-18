@@ -221,6 +221,64 @@ def test_googlesql_real_binary_parses_pipe_syntax(tmp_path, monkeypatch) -> None
     assert Analyzer().diagnostics(text, tmp_path) == []
 
 
+def test_completion_alias_scopes_to_a_fake_bigquery_table(tmp_path, monkeypatch) -> None:
+    """Live-table completion for bigquery cells, offline: the catalog chain
+    only ever calls list_datasets/list_tables/get_table on the client."""
+    from types import SimpleNamespace
+
+    from quicksql.executors.bigquery_exec import BigQueryExecutor
+    from quicksql.lsp.analysis import Analyzer
+
+    def field(name, type_):
+        return SimpleNamespace(
+            name=name, field_type=type_, mode="", fields=(), description=""
+        )
+
+    class FakeClient:
+        def list_tables(self, dataset_id):
+            return [SimpleNamespace(table_id="events", table_type="TABLE")]
+
+        def get_table(self, path):
+            assert path == "analytics.events"
+            return SimpleNamespace(schema=[field("event_id", "INT64"), field("name", "STRING")])
+
+    monkeypatch.setattr(BigQueryExecutor, "make_client", lambda self, spec: FakeClient())
+    text = (
+        "-- @input: { bigquery: { project: p } }\n"
+        "-- @cell c\nSELECT e. FROM analytics.events AS e\n"
+    )
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT e."))
+    fields = [c.label for c in comps if c.kind == "field"]
+    assert "event_id" in fields and "name" in fields
+
+
+@pytest.mark.bigquery
+def test_completion_alias_scopes_to_an_emulator_bigquery_table(tmp_path, bq_emulator) -> None:
+    from google.cloud import bigquery as bq
+
+    from quicksql.executors.bigquery_exec import BigQueryExecutor
+    from quicksql.lsp.analysis import Analyzer
+
+    client = BigQueryExecutor().make_client(
+        {"project": "quicksql-test", "endpoint": bq_emulator}
+    )
+    client.create_dataset("analytics", exists_ok=True)
+    client.create_table(
+        bq.Table(
+            "quicksql-test.analytics.events",
+            schema=[bq.SchemaField("event_id", "INT64"), bq.SchemaField("name", "STRING")],
+        ),
+        exists_ok=True,
+    )
+    text = (
+        f"-- @input: {{ bigquery: {{ project: quicksql-test, endpoint: {bq_emulator} }} }}\n"
+        "-- @cell c\nSELECT e. FROM analytics.events AS e\n"
+    )
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT e."))
+    fields = [c.label for c in comps if c.kind == "field"]
+    assert "event_id" in fields and "name" in fields
+
+
 def test_completion_alias_scope_survives_unsupported_pipe_operators(tmp_path) -> None:
     """sqlglot can't parse `|> SET`, but _resolve_scope parses at
     ErrorLevel.IGNORE and the partial tree still carries the FROM tables —

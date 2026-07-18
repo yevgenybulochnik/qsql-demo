@@ -34,6 +34,27 @@ def pg_dsn():
 
 
 @pytest.fixture
+def bq_emulator():
+    """Endpoint of the compose bigquery-emulator (docker compose up -d --wait;
+    project ``quicksql-test``); bigquery-marked tests skip when the 'bigquery'
+    extra or the emulator is unavailable."""
+    import urllib.error
+    import urllib.request
+
+    endpoint = os.environ.get("QUICKSQL_TEST_BQ_ENDPOINT", "http://localhost:9050")
+    pytest.importorskip(
+        "google.cloud.bigquery", reason="bigquery tests need the 'bigquery' extra"
+    )
+    try:
+        urllib.request.urlopen(endpoint, timeout=2)
+    except urllib.error.HTTPError:
+        pass  # any HTTP response means the emulator is listening
+    except OSError as exc:
+        pytest.skip(f"no bigquery emulator at {endpoint}: {exc}")
+    return endpoint
+
+
+@pytest.fixture
 def project_dir(tmp_path):
     (tmp_path / "seeds").mkdir()
     (tmp_path / "seeds" / "users.csv").write_text(
