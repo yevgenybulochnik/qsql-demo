@@ -859,3 +859,40 @@ async def test_split_pane_q_collapses_to_the_other_pane(notebook) -> None:
         assert app.mode == "data"  # still viewing the surviving pane
         assert len(app.panes) == 1 and app.panes[0]
         assert not app.query_one("#data2", DataTable).display
+
+
+async def test_run_streams_events_into_log_tab(notebook) -> None:
+    from textual.widgets import RichLog
+
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        # a hidden tab's RichLog has no width and defers rendering — show it first
+        app.query_one(TabbedContent).active = "tab_log"
+        await pilot.pause()
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        text = "\n".join(s.text for s in app.query_one("#log", RichLog).lines)
+        assert "run started" in text
+        assert "users: executing on duckdb" in text
+        assert "users: ok" in text and "rows" in text
+        assert "run finished" in text
+        assert text.count("users: ok") == 1  # event line replaces the old summary line
+
+
+async def test_config_only_edit_is_logged_without_rerun(notebook) -> None:
+    from textual.widgets import RichLog
+
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        app.query_one(TabbedContent).active = "tab_log"
+        await pilot.pause()
+        notebook.write_text(
+            notebook.read_text().replace(
+                "-- @cell users\n", "-- @cell users\n-- @output: { type: duckdb }\n"
+            )
+        )
+        assert app._on_recompiled(compile_file(notebook)) == []
+        await pilot.pause()
+        lines = [s.text for s in app.query_one("#log", RichLog).lines]
+        assert any("config changed" in l and "users" in l for l in lines)

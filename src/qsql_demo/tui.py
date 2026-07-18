@@ -45,7 +45,7 @@ from .errors import QsqlError
 from .models import RunResult
 from .runner import RunSession, run_project
 from .sheet import Sheet
-from .watcher import hashes_of, plan_rerun
+from .watcher import config_only_changes, hashes_of, plan_rerun
 
 
 class NotebookPicker(ModalScreen):
@@ -1019,7 +1019,13 @@ class QsqlApp(App):
             return
         names = select if select is not None else list(project.order)
         self.call_from_thread(self._mark_running, project, names)
-        results = run_project(project, select=select, closure=closure, session=self.session)
+        results = run_project(
+            project,
+            select=select,
+            closure=closure,
+            session=self.session,
+            on_event=lambda e: self.call_from_thread(self.log_line, e.line()),
+        )
         self.call_from_thread(self._apply_results, results)
 
     def _mark_running(self, project: Project, names: list[str]) -> None:
@@ -1029,13 +1035,10 @@ class QsqlApp(App):
         self._refresh_cells()
 
     def _apply_results(self, results: list[RunResult]) -> None:
+        # the run's event stream already logged each result via cell_finished
         for result in results:
             self.running.discard(result.cell)
             self.results[result.cell] = result
-            status = "ok" if result.ok else "FAILED"
-            self.log_line(
-                f"{status} {result.cell} rows={result.rows} {result.elapsed * 1000:.0f}ms -> {result.target}"
-            )
         self.running.clear()
         self._catalog_cache.invalidate()  # outputs and warehouses just changed
         self._refresh_cells()
@@ -1060,7 +1063,11 @@ class QsqlApp(App):
             self._on_recompiled(project)
 
     def _on_recompiled(self, project: Project) -> list[str]:
+        self.log_line(f"recompiled {self.path.name}: {len(project.cells)} cell(s)")
         planned = plan_rerun(self.hashes, project)
+        cfg_only = config_only_changes(self.project, project) if self.project else []
+        if cfg_only:
+            self.log_line(f"config changed (no rerun): {', '.join(cfg_only)}")
         # adopt the new project before consulting autorun overlays: a freshly
         # added cell only exists in the new one (KeyError otherwise)
         self.project = project
