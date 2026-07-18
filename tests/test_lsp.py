@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 # the lsp extra (sqlglot + pygls) is optional; skip this whole module without it
@@ -144,6 +146,78 @@ def test_diagnostics_surface_sqlglot_syntax_errors(tmp_path) -> None:
     text = "-- @engine: duckdb\n-- @cell a\nSELECT * FROM WHERE 1;\n"
     diags = Analyzer().diagnostics(text, tmp_path)
     assert any(d.source == "sqlglot" for d in diags)
+
+
+# ---------- analysis.py: googlesql-backed bigquery diagnostics ----------
+
+# body line 1 = file line 3; `|> SET` is valid BigQuery that sqlglot rejects
+_PIPE_TEXT = "-- @engine: bigquery\n-- @cell a\nFROM t\n|> SET x = 2\n"
+
+
+def _fake_execute_query(tmp_path, stdout: str = "", exit_code: int = 0):
+    """A stand-in `execute_query`: swallow stdin, print a canned parse result."""
+    payload = tmp_path / "payload.txt"
+    payload.write_text(stdout)
+    script = tmp_path / "fake_execute_query"
+    script.write_text(f"#!/bin/sh\ncat >/dev/null\ncat {payload}\nexit {exit_code}\n")
+    script.chmod(0o755)
+    return script
+
+
+def test_googlesql_errors_map_to_cell_relative_positions(tmp_path, monkeypatch) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    fake = _fake_execute_query(
+        tmp_path, "ERROR: Syntax error: boom [at 2:5]\n|> SET x = 2\n    ^\n"
+    )
+    monkeypatch.setenv("QSQL_EXECUTE_QUERY", str(fake))
+    diags = Analyzer().diagnostics(_PIPE_TEXT, tmp_path)
+    # input line 2 = file line 4 = row 3 (0-indexed); col 5 -> character 4
+    assert [(d.line, d.character, d.source) for d in diags] == [(3, 4, "googlesql")]
+    assert "boom" in diags[0].message
+
+
+def test_googlesql_clean_parse_accepts_pipe_operators_sqlglot_rejects(
+    tmp_path, monkeypatch
+) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    fake = _fake_execute_query(tmp_path, "QueryStatement [0-19]\n")
+    monkeypatch.setenv("QSQL_EXECUTE_QUERY", str(fake))
+    assert Analyzer().diagnostics(_PIPE_TEXT, tmp_path) == []
+
+
+def test_missing_binary_falls_back_to_sqlglot_and_downgrades_pipe_errors(
+    tmp_path, monkeypatch
+) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    monkeypatch.delenv("QSQL_EXECUTE_QUERY", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))  # no execute_query discoverable
+    diags = Analyzer().diagnostics(_PIPE_TEXT, tmp_path)
+    assert [(d.severity, d.source) for d in diags] == [("warning", "sqlglot")]
+    assert "pipe" in diags[0].message.lower()
+
+
+def test_broken_binary_falls_back_to_sqlglot(tmp_path, monkeypatch) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    fake = _fake_execute_query(tmp_path, "panic", exit_code=1)
+    monkeypatch.setenv("QSQL_EXECUTE_QUERY", str(fake))
+    diags = Analyzer().diagnostics(_PIPE_TEXT, tmp_path)
+    assert [(d.severity, d.source) for d in diags] == [("warning", "sqlglot")]
+
+
+@pytest.mark.skipif(
+    shutil.which("execute_query") is None,
+    reason="googlesql execute_query not on PATH",
+)
+def test_googlesql_real_binary_parses_pipe_syntax(tmp_path, monkeypatch) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    monkeypatch.delenv("QSQL_EXECUTE_QUERY", raising=False)
+    text = "-- @engine: bigquery\n-- @cell a\nFROM t\n|> SET x = 2\n|> DROP y\n"
+    assert Analyzer().diagnostics(text, tmp_path) == []
 
 
 def _land_users(tmp_path, text):
