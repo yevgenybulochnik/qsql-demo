@@ -622,3 +622,26 @@ def test_completion_derives_cte_alias_columns_from_its_projection(tmp_path) -> N
     labels = {c.label for c in scoped if c.kind == "field"}
     # the CTE's own projected columns, output alias included
     assert labels == {"user_id", "member_name"}
+
+
+def test_server_sorts_columns_above_keywords() -> None:
+    """Clients sort by sortText when present; fields must rank above tables,
+    refs, and keywords regardless of label alphabetics, keeping server order
+    within each kind."""
+    pytest.importorskip("pygls", reason="install the 'lsp' extra")
+    from quicksql.lsp.analysis import Completion
+    from quicksql.lsp.server import _to_lsp_completion
+
+    items = [
+        _to_lsp_completion(c, i)
+        for i, c in enumerate(
+            [
+                Completion("zulu_col", "field", "INT64"),
+                Completion("alpha_col", "field", "STRING"),
+                Completion("a_cell", "reference"),
+                Completion("AND", "keyword"),
+            ]
+        )
+    ]
+    ordered = sorted(items, key=lambda it: it.sort_text)
+    assert [it.label for it in ordered] == ["zulu_col", "alpha_col", "a_cell", "AND"]

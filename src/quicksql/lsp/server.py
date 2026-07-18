@@ -24,6 +24,9 @@ _SEVERITY = {
     "error": types.DiagnosticSeverity.Error,
     "warning": types.DiagnosticSeverity.Warning,
 }
+# clients sort by sortText when present: columns above tables/refs, SQL
+# keywords last, server order preserved within each kind
+_SORT_RANK = {"field": "0", "table": "1", "reference": "2", "keyword": "3"}
 
 
 def _to_lsp_diagnostic(d: Diagnostic) -> types.Diagnostic:
@@ -35,6 +38,15 @@ def _to_lsp_diagnostic(d: Diagnostic) -> types.Diagnostic:
         message=d.message,
         severity=_SEVERITY.get(d.severity, types.DiagnosticSeverity.Error),
         source=d.source,
+    )
+
+
+def _to_lsp_completion(c, index: int) -> types.CompletionItem:
+    return types.CompletionItem(
+        label=c.label,
+        kind=_KIND.get(c.kind),
+        detail=c.detail or None,
+        sort_text=f"{_SORT_RANK.get(c.kind, '9')}{index:04d}",
     )
 
 
@@ -74,12 +86,7 @@ def create_server() -> LanguageServer:
         )
         return types.CompletionList(
             is_incomplete=False,
-            items=[
-                types.CompletionItem(
-                    label=c.label, kind=_KIND.get(c.kind), detail=c.detail or None
-                )
-                for c in items
-            ],
+            items=[_to_lsp_completion(c, i) for i, c in enumerate(items)],
         )
 
     @server.feature(types.TEXT_DOCUMENT_DEFINITION)
