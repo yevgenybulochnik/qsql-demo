@@ -168,11 +168,12 @@ def test_googlesql_errors_map_to_cell_relative_positions(tmp_path, monkeypatch) 
     from quicksql.lsp.analysis import Analyzer
 
     fake = _fake_execute_query(
-        tmp_path, "ERROR: Syntax error: boom [at 2:5]\n|> SET x = 2\n    ^\n"
+        tmp_path, "ERROR: Syntax error: boom [at 3:5]\n|> SET x = 2\n    ^\n"
     )
     monkeypatch.setenv("QSQL_EXECUTE_QUERY", str(fake))
     diags = Analyzer().diagnostics(_PIPE_TEXT, tmp_path)
-    # input line 2 = file line 4 = row 3 (0-indexed); col 5 -> character 4
+    # cell.source line 1 is the `-- @cell a` line itself, so input line 3 =
+    # file line 4 = row 3 (0-indexed); col 5 -> character 4
     assert [(d.line, d.character, d.source) for d in diags] == [(3, 4, "googlesql")]
     assert "boom" in diags[0].message
 

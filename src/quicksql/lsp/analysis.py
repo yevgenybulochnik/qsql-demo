@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from sqlglot.errors import ErrorLevel, ParseError
 
 from ..compiler import compile_text
 from ..errors import ConfigErrorGroup, CycleError, ParseError as QsqlParseError, QsqlError
+from .googlesql import find_execute_query, parse_errors
 from .mask import Ref, Source, mask_jinja
 from .schema import SchemaCache, columns_for
 
@@ -55,6 +57,11 @@ class Analyzer:
 
     cache: SchemaCache = field(default_factory=SchemaCache)
 
+    @cached_property
+    def _gsql_bin(self) -> str | None:
+        """googlesql `execute_query`, resolved once per Analyzer (or None)."""
+        return find_execute_query()
+
     # ---------- diagnostics ----------
 
     def diagnostics(self, text: str, root: Path | str = ".") -> list[Diagnostic]:
@@ -68,7 +75,7 @@ class Analyzer:
             return [_line_diag(text, 1, str(exc))]
         diags: list[Diagnostic] = []
         for cell in project.cells.values():
-            diags.extend(_syntax_diagnostics(cell))
+            diags.extend(_syntax_diagnostics(cell, self._gsql_bin))
         return diags
 
     # ---------- completions ----------
@@ -164,23 +171,41 @@ def _line_diag(text: str, line1: int, message: str, severity: str = "error") -> 
     return Diagnostic(row, 0, row, width, message, severity)
 
 
-def _syntax_diagnostics(cell: Any) -> list[Diagnostic]:
+def _syntax_diagnostics(cell: Any, gsql_bin: str | None = None) -> list[Diagnostic]:
     dialect = _DIALECT.get(cell.engine)
     if dialect is None or "{%" in cell.source:
         return []  # control-flow Jinja can't be masked into valid SQL (v1 limit)
     masked, _ = mask_jinja(cell.source)
+    if dialect == "bigquery" and gsql_bin is not None:
+        hits = parse_errors(gsql_bin, masked)
+        if hits is not None:  # None: tool failed, fall through to sqlglot
+            out: list[Diagnostic] = []
+            for line, col0, msg in hits:
+                # googlesql line/col are 1-indexed within masked (== cell.source
+                # positions), whose line 1 is file line cell.line
+                row = cell.line + line - 2
+                col = max(col0 - 1, 0)
+                out.append(Diagnostic(row, col, row, col + 1, msg, "error", "googlesql"))
+            return out
     try:
         sqlglot.parse(masked, dialect=dialect)
     except ParseError as exc:
-        out: list[Diagnostic] = []
+        out = []
         for err in exc.errors:
             # sqlglot line/col are 1-indexed within cell.source, whose line 1
             # is file line cell.line
             row = cell.line + int(err.get("line", 1)) - 2
             col = max(int(err.get("col", 1)) - 1, 0)
-            out.append(
-                Diagnostic(row, col, row, col + 1, err["description"], "error", "sqlglot")
-            )
+            desc = err["description"]
+            if "Unsupported pipe syntax" in desc:
+                # valid BigQuery sqlglot can't parse — warn, don't block
+                msg = (
+                    f"{desc} Cell not fully validated; install googlesql "
+                    "execute_query for complete pipe-syntax checks."
+                )
+                out.append(Diagnostic(row, col, row, col + 1, msg, "warning", "sqlglot"))
+            else:
+                out.append(Diagnostic(row, col, row, col + 1, desc, "error", "sqlglot"))
         return out
     return []
 

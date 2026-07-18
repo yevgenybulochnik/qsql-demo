@@ -78,6 +78,11 @@ first `@cell`) inherited by every cell.
 - `executors/`, `sinks/` — strategy leaves (duckdb/sqlite/postgres/bigquery;
   parquet/duckdb/postgres)
 - `scaffold.py`, `cli.py`, `watcher.py`, `sheet.py` + `tui.py` — CLI, watch loop, TUI
+- `lsp/` — `analysis.py` (diagnostics/completions on sqlglot + length-preserving
+  Jinja mask), `server.py` (pygls stdio); bigquery cells prefer the googlesql
+  `execute_query` binary when found (PATH or `QSQL_EXECUTE_QUERY` — deliberately
+  not `QUICKSQL_*`, which overrides.py sweeps into config), fallback sqlglot with
+  unsupported-pipe-operator errors downgraded to warnings
 
 ## Development methodology — red-green-refactor
 

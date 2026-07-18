@@ -54,3 +54,23 @@ highlighting), then starts `quicksql lsp` for each buffer, rooted at the nearest
   once (`quicksql run`) so its sink exists.
 - Cells containing `{% %}` control flow skip the SQL-syntax lint pass (the
   compiler diagnostics still cover them).
+
+### BigQuery pipe-syntax validation (optional)
+
+sqlglot (the default linter) can't parse six valid BigQuery pipe operators
+(`|> SET / DROP / RENAME / CALL / WINDOW / ASSERT`); such cells get a *warning*
+("cell not fully validated") instead of a false error. For reference-grade
+validation, install the GoogleSQL (ex-ZetaSQL) `execute_query` binary — it
+implements the actual BigQuery grammar:
+
+1. Download `execute_query_linux` or `execute_query_macos` from
+   <https://github.com/google/googlesql/releases> (Linux/macOS only) and
+   `chmod +x` it.
+2. Put it on PATH as `execute_query`, or point the LSP at it explicitly with
+   `QSQL_EXECUTE_QUERY=/path/to/execute_query`.
+
+When discoverable, all `@engine: bigquery` cells' syntax diagnostics come from
+googlesql (source `googlesql` in the editor) with sqlglot as the fallback.
+Parse-only: table names aren't resolved, and completions still use sqlglot, so
+a cell using one of the six operators above loses alias-scoped column
+completion.
