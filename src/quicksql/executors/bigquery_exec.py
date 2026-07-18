@@ -29,6 +29,18 @@ class BigQueryExecutor(Executor):
             raise ExecutorError(
                 "bigquery engine needs the 'bigquery' extra: uv sync --extra bigquery"
             ) from exc
+        endpoint = spec.get("endpoint")
+        if endpoint:
+            # a local emulator (e.g. goccy/bigquery-emulator): anonymous
+            # credentials, or the client goes hunting for ADC and dies offline
+            from google.api_core.client_options import ClientOptions
+            from google.auth.credentials import AnonymousCredentials
+
+            return bigquery.Client(
+                project=spec.get("project"),
+                client_options=ClientOptions(api_endpoint=endpoint),
+                credentials=AnonymousCredentials(),
+            )
         return bigquery.Client(project=spec.get("project"))
 
     def _session_state(self, cell: RenderedCell, ctx: RunContext, spec: dict[str, Any]) -> dict:

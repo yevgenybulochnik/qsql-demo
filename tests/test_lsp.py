@@ -259,17 +259,29 @@ def test_completion_alias_scopes_to_an_emulator_bigquery_table(tmp_path, bq_emul
     from quicksql.executors.bigquery_exec import BigQueryExecutor
     from quicksql.lsp.analysis import Analyzer
 
+    from google.cloud.exceptions import NotFound
+
     client = BigQueryExecutor().make_client(
         {"project": "quicksql-test", "endpoint": bq_emulator}
     )
-    client.create_dataset("analytics", exists_ok=True)
-    client.create_table(
-        bq.Table(
-            "quicksql-test.analytics.events",
-            schema=[bq.SchemaField("event_id", "INT64"), bq.SchemaField("name", "STRING")],
-        ),
-        exists_ok=True,
-    )
+    # goccy answers duplicate creates with a retryable 500 rather than the 409
+    # exists_ok expects, so probe-then-create instead of create(exists_ok=True)
+    try:
+        client.get_dataset("analytics")
+    except NotFound:
+        client.create_dataset("analytics")
+    try:
+        client.get_table("quicksql-test.analytics.events")
+    except NotFound:
+        client.create_table(
+            bq.Table(
+                "quicksql-test.analytics.events",
+                schema=[
+                    bq.SchemaField("event_id", "INT64"),
+                    bq.SchemaField("name", "STRING"),
+                ],
+            )
+        )
     text = (
         f"-- @input: {{ bigquery: {{ project: quicksql-test, endpoint: {bq_emulator} }} }}\n"
         "-- @cell c\nSELECT e. FROM analytics.events AS e\n"

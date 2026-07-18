@@ -49,12 +49,15 @@ first `@cell`) inherited by every cell.
 - `uv run pytest` — markers `network` / `bigquery` / `postgres` are deselected by default.
   `docker compose up -d --wait` stands up Postgres (databases: `quicksql` for stress/manual
   data, `quicksql_test` for pytest, `quicksql_claims` for the synthetic-claims smoke test —
-  seed per `examples/claims_seed.sql`, drive with `examples/claims.qsql`), then
-  `uv run --extra postgres pytest -m postgres` runs
-  the integration tests; they skip when the server is down. Override the DSN with
-  `QUICKSQL_TEST_PG_DSN`. Everything except the cloud-gated tests:
-  `uv run --extra postgres pytest -m "not (network or bigquery)"` — an explicit `-m`
-  overrides the default deselection.
+  seed per `examples/claims_seed.sql`, drive with `examples/claims.qsql`) plus the goccy
+  bigquery-emulator (REST :9050, project `quicksql-test` — no GCP account needed; cells
+  reach it via `input.bigquery.endpoint`; it answers duplicate creates with a retryable
+  500, so tests seed probe-then-create, never `create(exists_ok=True)`). Then
+  `uv run --extra postgres pytest -m postgres` / `uv run --extra bigquery pytest -m bigquery`
+  run the integration tests; they skip when their backend is down. Override endpoints with
+  `QUICKSQL_TEST_PG_DSN` / `QUICKSQL_TEST_BQ_ENDPOINT`. Everything except the
+  network-gated tests: `uv run --extra postgres --extra bigquery pytest -m "not network"`
+  — an explicit `-m` overrides the default deselection.
 - `uv run quicksql` (bare = init) | `init` | `run` | `watch` | `tui` | `list` | `show <cell>` |
   `compile` — default file `base.qsql`; `--set key.path=value` repeatable. `quicksql tui`
   with a missing file opens a notebook picker: existing .qsql/.qsql.sql files plus

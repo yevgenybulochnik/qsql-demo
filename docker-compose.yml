@@ -1,13 +1,22 @@
-# Local Postgres for quicksql: integration tests, stress data, manual poking.
+# Local backends for quicksql: integration tests, stress data, manual poking.
 #
 #   docker compose up -d --wait
 #
-# Three databases on one server (created on first boot of an empty volume):
+# Postgres — three databases on one server (created on first boot of an empty
+# volume):
 #   quicksql        — long-lived data: stress seeds, manual TUI sessions
 #   quicksql_test   — pytest's sandbox (tests create/drop their own tables)
 #   quicksql_claims — synthetic healthcare claims for smoke tests
 #                 (seed per examples/claims_seed.sql)
 # The named volume keeps seeded data across `docker compose down` and reboots.
+#
+# bigquery-emulator — goccy's BigQuery API emulator (REST on :9050), project
+# `quicksql-test`; drives the bigquery-marked tests without a GCP account:
+#   uv run --extra bigquery pytest -m bigquery
+# Point a cell at it with `input: { bigquery: { project: quicksql-test,
+# endpoint: http://localhost:9050 } }`. State is in-memory: gone on restart,
+# tests reseed what they need. Known quirk: duplicate creates answer 500 (not
+# 409), so seed with probe-then-create, never create(exists_ok=True).
 
 services:
   postgres:
@@ -31,6 +40,12 @@ services:
       timeout: 3s
       retries: 30
       start_period: 30s
+
+  bigquery-emulator:
+    image: ghcr.io/goccy/bigquery-emulator:latest
+    command: ["--project=quicksql-test"]
+    ports:
+      - "9050:9050"
 
 volumes:
   quicksql-pg:
