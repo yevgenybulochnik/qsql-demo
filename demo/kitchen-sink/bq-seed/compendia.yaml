@@ -1,0 +1,194 @@
+# Drug compendia reference data for the kitchen-sink demo, loaded into the
+# goccy bigquery-emulator at startup via --data-from-yaml (see
+# docker-compose.yml). State is in-memory: every restart reseeds from here.
+#
+# The 10 NDCs and drug names match claims.pharmacy_claims in the Postgres seed
+# (pg-init/10-claims-core.sql) verbatim, so cross-engine joins on ndc hit.
+projects:
+  - id: quicksql-test
+    datasets:
+      - id: compendia
+        tables:
+          - id: ndc_directory
+            columns:
+              - name: ndc
+                type: STRING
+              - name: drug_name
+                type: STRING
+              - name: generic_name
+                type: STRING
+              - name: strength
+                type: STRING
+              - name: dosage_form
+                type: STRING
+              - name: route
+                type: STRING
+              - name: brand_generic
+                type: STRING
+              - name: labeler_name
+                type: STRING
+              - name: therapeutic_class_code
+                type: STRING
+            data:
+              - ndc: "00093104801"
+                drug_name: "METFORMIN HCL 500MG TAB"
+                generic_name: "metformin hydrochloride"
+                strength: "500 mg"
+                dosage_form: "tablet"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "TEVA PHARMACEUTICALS USA"
+                therapeutic_class_code: "BIGU"
+              - ndc: "00071015523"
+                drug_name: "ATORVASTATIN 20MG TAB"
+                generic_name: "atorvastatin calcium"
+                strength: "20 mg"
+                dosage_form: "tablet"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "PARKE-DAVIS"
+                therapeutic_class_code: "STAT"
+              - ndc: "68180051303"
+                drug_name: "LISINOPRIL 10MG TAB"
+                generic_name: "lisinopril"
+                strength: "10 mg"
+                dosage_form: "tablet"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "LUPIN PHARMACEUTICALS"
+                therapeutic_class_code: "ACEI"
+              - ndc: "69097012415"
+                drug_name: "AMLODIPINE 5MG TAB"
+                generic_name: "amlodipine besylate"
+                strength: "5 mg"
+                dosage_form: "tablet"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "CIPLA USA"
+                therapeutic_class_code: "CCB"
+              - ndc: "00378602001"
+                drug_name: "OMEPRAZOLE 20MG CAP"
+                generic_name: "omeprazole"
+                strength: "20 mg"
+                dosage_form: "delayed-release capsule"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "MYLAN PHARMACEUTICALS"
+                therapeutic_class_code: "PPI"
+              - ndc: "68180035106"
+                drug_name: "SERTRALINE 50MG TAB"
+                generic_name: "sertraline hydrochloride"
+                strength: "50 mg"
+                dosage_form: "tablet"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "LUPIN PHARMACEUTICALS"
+                therapeutic_class_code: "SSRI"
+              - ndc: "00173068224"
+                drug_name: "ALBUTEROL HFA 90MCG INH"
+                generic_name: "albuterol sulfate"
+                strength: "90 mcg/actuation"
+                dosage_form: "inhalation aerosol"
+                route: "inhalation"
+                brand_generic: "B"
+                labeler_name: "GLAXOSMITHKLINE"
+                therapeutic_class_code: "BAGO"
+              - ndc: "00088221905"
+                drug_name: "INSULIN GLARGINE 100U/ML VIAL"
+                generic_name: "insulin glargine"
+                strength: "100 units/mL"
+                dosage_form: "injectable solution"
+                route: "subcutaneous"
+                brand_generic: "B"
+                labeler_name: "SANOFI-AVENTIS"
+                therapeutic_class_code: "INSU"
+              - ndc: "00527134301"
+                drug_name: "LEVOTHYROXINE 50MCG TAB"
+                generic_name: "levothyroxine sodium"
+                strength: "50 mcg"
+                dosage_form: "tablet"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "LANNETT COMPANY"
+                therapeutic_class_code: "THYR"
+              - ndc: "67877022310"
+                drug_name: "GABAPENTIN 300MG CAP"
+                generic_name: "gabapentin"
+                strength: "300 mg"
+                dosage_form: "capsule"
+                route: "oral"
+                brand_generic: "G"
+                labeler_name: "ASCEND LABORATORIES"
+                therapeutic_class_code: "GABA"
+          - id: therapeutic_classes
+            columns:
+              - name: class_code
+                type: STRING
+              - name: class_name
+                type: STRING
+              - name: description
+                type: STRING
+            data:
+              - class_code: "BIGU"
+                class_name: "Biguanides"
+                description: "Oral antihyperglycemics that decrease hepatic glucose production"
+              - class_code: "STAT"
+                class_name: "HMG-CoA Reductase Inhibitors"
+                description: "Statins; lower LDL cholesterol"
+              - class_code: "ACEI"
+                class_name: "ACE Inhibitors"
+                description: "Angiotensin-converting enzyme inhibitors for hypertension and heart failure"
+              - class_code: "CCB"
+                class_name: "Calcium Channel Blockers"
+                description: "Dihydropyridine antihypertensives"
+              - class_code: "PPI"
+                class_name: "Proton Pump Inhibitors"
+                description: "Gastric acid suppression for GERD and ulcer disease"
+              - class_code: "SSRI"
+                class_name: "Selective Serotonin Reuptake Inhibitors"
+                description: "First-line antidepressants"
+              - class_code: "BAGO"
+                class_name: "Short-Acting Beta Agonists"
+                description: "Inhaled bronchodilators for acute bronchospasm"
+              - class_code: "INSU"
+                class_name: "Long-Acting Insulins"
+                description: "Basal insulin analogs for diabetes mellitus"
+              - class_code: "THYR"
+                class_name: "Thyroid Hormones"
+                description: "Replacement therapy for hypothyroidism"
+              - class_code: "GABA"
+                class_name: "Gabapentinoids"
+                description: "Anticonvulsants also used for neuropathic pain"
+          - id: drug_pricing
+            columns:
+              - name: ndc
+                type: STRING
+              - name: effective_date
+                type: DATE
+              - name: awp_unit_price
+                type: FLOAT64
+              - name: wac_unit_price
+                type: FLOAT64
+              - name: price_basis
+                type: STRING
+            data:
+              - { ndc: "00093104801", effective_date: "2025-01-01", awp_unit_price: 0.08, wac_unit_price: 0.03, price_basis: "AWP" }
+              - { ndc: "00093104801", effective_date: "2025-07-01", awp_unit_price: 0.09, wac_unit_price: 0.03, price_basis: "AWP" }
+              - { ndc: "00071015523", effective_date: "2025-01-01", awp_unit_price: 0.22, wac_unit_price: 0.09, price_basis: "AWP" }
+              - { ndc: "00071015523", effective_date: "2025-07-01", awp_unit_price: 0.24, wac_unit_price: 0.10, price_basis: "AWP" }
+              - { ndc: "68180051303", effective_date: "2025-01-01", awp_unit_price: 0.06, wac_unit_price: 0.02, price_basis: "AWP" }
+              - { ndc: "68180051303", effective_date: "2025-07-01", awp_unit_price: 0.07, wac_unit_price: 0.02, price_basis: "AWP" }
+              - { ndc: "69097012415", effective_date: "2025-01-01", awp_unit_price: 0.05, wac_unit_price: 0.02, price_basis: "AWP" }
+              - { ndc: "69097012415", effective_date: "2025-07-01", awp_unit_price: 0.05, wac_unit_price: 0.02, price_basis: "AWP" }
+              - { ndc: "00378602001", effective_date: "2025-01-01", awp_unit_price: 0.35, wac_unit_price: 0.14, price_basis: "AWP" }
+              - { ndc: "00378602001", effective_date: "2025-07-01", awp_unit_price: 0.38, wac_unit_price: 0.15, price_basis: "AWP" }
+              - { ndc: "68180035106", effective_date: "2025-01-01", awp_unit_price: 0.12, wac_unit_price: 0.05, price_basis: "AWP" }
+              - { ndc: "68180035106", effective_date: "2025-07-01", awp_unit_price: 0.13, wac_unit_price: 0.05, price_basis: "AWP" }
+              - { ndc: "00173068224", effective_date: "2025-01-01", awp_unit_price: 4.85, wac_unit_price: 3.90, price_basis: "AWP" }
+              - { ndc: "00173068224", effective_date: "2025-07-01", awp_unit_price: 5.10, wac_unit_price: 4.05, price_basis: "AWP" }
+              - { ndc: "00088221905", effective_date: "2025-01-01", awp_unit_price: 28.50, wac_unit_price: 23.75, price_basis: "AWP" }
+              - { ndc: "00088221905", effective_date: "2025-07-01", awp_unit_price: 29.90, wac_unit_price: 24.90, price_basis: "AWP" }
+              - { ndc: "00527134301", effective_date: "2025-01-01", awp_unit_price: 0.30, wac_unit_price: 0.12, price_basis: "AWP" }
+              - { ndc: "00527134301", effective_date: "2025-07-01", awp_unit_price: 0.32, wac_unit_price: 0.13, price_basis: "AWP" }
+              - { ndc: "67877022310", effective_date: "2025-01-01", awp_unit_price: 0.10, wac_unit_price: 0.04, price_basis: "AWP" }
+              - { ndc: "67877022310", effective_date: "2025-07-01", awp_unit_price: 0.11, wac_unit_price: 0.04, price_basis: "AWP" }

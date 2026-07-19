@@ -1,0 +1,109 @@
+/*@
+input:
+  postgres:
+    dsn: postgresql://quicksql:quicksql@localhost:5432/quicksql_claims
+output:
+  type: parquet
+  dir: data/
+vars:
+  months: 18
+*/
+-- Kitchen-sink demo: three engines in one notebook. Postgres holds the
+-- transactional claims (seeded by pg-init/, including the 250-column
+-- claims.claims_837_wide extract — browse it with S in the TUI), the BigQuery
+-- emulator holds the drug compendia (bq-seed/compendia.yaml), and DuckDB is
+-- the conduit that joins them. Stand up the backends first:
+--   docker compose -f demo/kitchen-sink/docker-compose.yml up -d --wait
+-- Then: uv run --extra postgres --extra bigquery quicksql tui demo/kitchen-sink/kitchen-sink.qsql
+
+-- @cell enrolled_members
+SELECT plan_code, count(*) AS members
+FROM claims.eligibility
+WHERE term_date IS NULL
+GROUP BY plan_code
+ORDER BY members DESC;
+
+-- @cell wide_claim_profile
+-- A few of claims.claims_837_wide's 250 columns: paid claims by primary
+-- diagnosis, with the first two flattened service lines split out.
+SELECT diag_code_01                        AS primary_diagnosis,
+       count(*)                            AS claims,
+       sum(total_billed_amount)            AS billed,
+       sum(total_paid_amount)              AS paid,
+       sum(line1_paid_amount)              AS line1_paid,
+       sum(coalesce(line2_paid_amount, 0)) AS line2_paid
+FROM claims.claims_837_wide
+WHERE claim_status = 'paid'
+GROUP BY diag_code_01
+ORDER BY paid DESC;
+
+-- @cell rx_fills
+SELECT ndc,
+       count(*)         AS fills,
+       sum(quantity)    AS units,
+       sum(plan_paid)   AS plan_paid,
+       sum(patient_pay) AS member_oop
+FROM claims.pharmacy_claims
+WHERE claim_status = 'paid'
+GROUP BY ndc;
+
+-- @cell drug_reference
+-- @engine: bigquery
+/*@ input: { bigquery: { project: quicksql-test, endpoint: http://localhost:9050 } } */
+-- One row per NDC: directory attributes, therapeutic class, latest price.
+SELECT d.ndc,
+       d.drug_name,
+       d.generic_name,
+       d.brand_generic,
+       d.labeler_name,
+       c.class_code,
+       c.class_name,
+       p.awp_unit_price,
+       p.wac_unit_price,
+       p.effective_date AS price_effective_date
+FROM compendia.ndc_directory d
+JOIN compendia.therapeutic_classes c
+  ON c.class_code = d.therapeutic_class_code
+JOIN (
+  SELECT ndc, max(effective_date) AS effective_date
+  FROM compendia.drug_pricing
+  GROUP BY ndc
+) latest
+  ON latest.ndc = d.ndc
+JOIN compendia.drug_pricing p
+  ON p.ndc = latest.ndc AND p.effective_date = latest.effective_date;
+
+-- @cell class_spend
+-- @engine: duckdb
+-- @output: { type: duckdb, path: warehouse.db }
+-- Cross-engine join: Postgres pharmacy spend x BigQuery compendia,
+-- landed in a DuckDB sink instead of the default parquet.
+SELECT r.class_name,
+       r.brand_generic,
+       sum(f.fills)                             AS fills,
+       sum(f.plan_paid)                         AS plan_paid,
+       sum(f.member_oop)                        AS member_oop,
+       round(sum(f.units * r.awp_unit_price), 2) AS awp_value
+FROM {{ ref('rx_fills') }} f
+JOIN {{ ref('drug_reference') }} r ON r.ndc = f.ndc
+GROUP BY r.class_name, r.brand_generic
+ORDER BY plan_paid DESC;
+
+-- @cell pmpm
+-- @engine: duckdb
+-- Reads class_spend back out of the DuckDB sink; months comes from vars
+-- (try: --set vars.months=12).
+SELECT el.members,
+       cs.rx_paid,
+       round(cs.rx_paid / el.members / {{ var('months') }}, 2) AS rx_pmpm
+FROM (SELECT sum(members) AS members FROM {{ ref('enrolled_members') }}) el,
+     (SELECT sum(plan_paid) AS rx_paid FROM {{ ref('class_spend') }}) cs;
+
+-- @cell scratch_notes
+-- @engine: duckdb
+-- @autorun: false
+-- Skipped by watch/TUI autorun cascades; run it on demand (r in the TUI).
+SELECT class_name, plan_paid, awp_value
+FROM {{ ref('class_spend') }}
+WHERE brand_generic = 'B'
+ORDER BY plan_paid DESC;

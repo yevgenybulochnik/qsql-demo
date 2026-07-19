@@ -1,49 +1,13 @@
 # demo
 
-The GIF in the project README: Postgres cells running next to the data, a
-cross-engine DuckDB cell joining their results, a live nvim edit triggering an
-autorun rerun of just the changed cell and its downstream, and the VisiData
-deep-dive.
+Self-contained subdirectories, each showcasing a slice of quicksql. Every demo
+brings its own backends (docker compose) and seed data; nothing here is needed
+by the test suite (the repo-root `docker-compose.yml` is the pytest stack).
 
-Two tapes, two stories:
-
-- **`demo.tape`** → `quicksql-demo.gif` — *the workflow.* Edits an existing cell; the
-  rerun cascades to its downstream while the unrelated cell stays untouched.
-- **`build.tape`** → `quicksql-build.gif` — *the format.* Writes a cross-engine cell
-  on camera; saving it makes the cell appear in the DAG and run itself (a new
-  cell has no previous hash, so watch mode counts it as changed).
-
-| file | what it is |
+| directory | what it shows |
 |---|---|
-| `demo.qsql` | the finished notebook — two Postgres cells + one DuckDB cell |
-| `build.qsql` | the same, minus the DuckDB cell — `build.tape` types it live |
-| `seed.sql` | the demo tables (8 customers, 5k orders) |
-| `scene.sh` | the tmux layout: nvim (left) \| `quicksql tui` (right); takes a notebook name |
-| `demo.tape`, `build.tape` | the [VHS](https://github.com/charmbracelet/vhs) scripts |
+| [`kitchen-sink/`](kitchen-sink/) | the works — Postgres claims warehouse (incl. a 250-column table), BigQuery-emulator drug compendia, cross-engine DuckDB joins, vars, DuckDB sink, autorun |
 
-## Regenerating the GIFs
-
-```console
-$ docker compose up -d --wait
-$ docker compose exec -T postgres psql -U quicksql -d quicksql -q < demo/seed.sql
-$ uv sync --extra postgres --extra visidata
-$ vhs demo/demo.tape                      # from the repo root -> demo/quicksql-demo.gif
-$ vhs demo/build.tape                     #                    -> demo/quicksql-build.gif
-```
-
-Needs `vhs`, `ttyd`, `ffmpeg`, `tmux` and `nvim` on PATH. VHS shells out to ffmpeg
-to encode, so ffmpeg is not optional.
-
-`scene.sh` also runs standalone (`./demo/scene.sh`) if you just want the layout to
-poke at by hand — it drops you into the tmux session.
-
-## Notes
-
-The tapes *really* edit the notebook — nvim saves it, which is the point (that
-save is what autorun reacts to). `scene.sh` therefore starts with
-`git checkout -- <notebook>`, so recordings are repeatable and the file never
-drifts. If you edit a notebook, commit it before recording.
-
-`build.tape` runs its `R` beat before ever showing the nvim pane. That is
-deliberate: lazy.nvim's startup notification needs a few seconds to fade, and
-the TUI beat covers exactly that window.
+Heads-up: the demo compose stacks reuse the root stack's ports (5432, 9050),
+so stop one before starting the other (`docker compose down` at the repo root,
+or `docker compose -f demo/<name>/docker-compose.yml down`).
