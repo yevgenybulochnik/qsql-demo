@@ -127,6 +127,48 @@ def test_bigquery_executor_with_fake_client(ctx, monkeypatch) -> None:
     assert ctx.conn.sql(f'SELECT count(*) FROM "{view}"').fetchone() == (2,)
 
 
+def test_bigquery_emulator_endpoint_disables_retries(tmp_path, monkeypatch) -> None:
+    """goccy reports every execution failure with a retryable-looking reason
+    (jobInternalError), so the client's default 600s job retry re-submits a
+    failing query for ten minutes — wedging the TUI's run worker; a down
+    emulator blocks the same way via the API retry. Emulator endpoints must
+    fail fast: retry=None and job_retry=None on every query. Specs without
+    an endpoint (real BigQuery) keep the client defaults."""
+    from quicksql.compiler import compile_text
+
+    captured: list[dict] = []
+
+    class FakeJob:
+        session_info = None
+
+        def result(self):
+            return self
+
+        def to_arrow(self):
+            return pl.DataFrame({"x": [1]})
+
+    class FakeClient:
+        def query(self, sql, job_config=None, **kwargs):
+            captured.append(kwargs)
+            return FakeJob()
+
+    monkeypatch.setattr(BigQueryExecutor, "make_client", lambda self, spec: FakeClient())
+    monkeypatch.setattr(BigQueryExecutor, "_job_config", lambda self, state: None)
+    project = compile_text(
+        "/*@ input: { bigquery: { project: p, endpoint: http://localhost:9050 } } */\n"
+        "-- @cell parent\nSELECT 1 AS x;\n"
+        "-- @cell child\nSELECT * FROM {{ ref('parent') }};",
+        root=tmp_path,
+    )
+    results = {r.cell: r for r in project.run()}
+    assert all(r.ok for r in results.values()), [r.error for r in results.values()]
+    assert captured  # both the session path and the plain path submit jobs
+    assert all(
+        "retry" in k and k["retry"] is None and "job_retry" in k and k["job_retry"] is None
+        for k in captured
+    ), captured
+
+
 def test_bigquery_make_client_honors_emulator_endpoint() -> None:
     """An `endpoint` in the input spec points the client at an emulator: no
     real credentials, no ADC lookup."""
