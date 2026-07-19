@@ -699,6 +699,36 @@ def test_completion_offers_dialect_function_vocabulary(tmp_path) -> None:
     assert "RANGE_SESSIONIZE" not in funcs2
 
 
+def test_completion_vocab_excludes_internal_and_cross_dialect_names() -> None:
+    """The function vocabulary must not offer names the engine doesn't have.
+    sqlglot's parser registry is a pool shared across dialects, so its base
+    carries BigQuery-only names (SAFE_DIVIDE, GAP_FILL, GENERATE_UUID) and even
+    sqlglot's internal abstract-wrapper classes (SAFE_FUNC) — none of which are
+    valid in a duckdb cell. duckdb's vocabulary comes from its own embedded
+    catalog instead, so those are absent while real duckdb functions the shared
+    pool would otherwise mask (ARRAY_APPEND, ARGMAX) survive. The internal
+    wrappers are dropped from every dialect, but genuinely-BigQuery functions
+    stay for a bigquery cell."""
+    from quicksql.lsp import vocab
+
+    duck = set(vocab.functions("duckdb"))
+    bq = set(vocab.functions("bigquery"))
+
+    # sqlglot-internal abstract wrappers are not SQL in any dialect
+    assert "SAFE_FUNC" not in duck
+    assert "SAFE_FUNC" not in bq
+
+    # BigQuery-exclusive names must not leak into a duckdb cell...
+    for name in ("SAFE_DIVIDE", "GAP_FILL", "GENERATE_UUID"):
+        assert name not in duck, f"{name} leaked into duckdb vocab"
+    # ...while remaining for bigquery, where they are real functions
+    assert "SAFE_DIVIDE" in bq
+    assert "GENERATE_UUID" in bq
+
+    # real duckdb functions survive — guard against over-filtering
+    assert {"ARRAY_APPEND", "ARGMAX", "COUNT"} <= duck
+
+
 def test_server_sorts_columns_above_keywords() -> None:
     """Clients sort by sortText when present; fields must rank above tables,
     refs, and keywords regardless of label alphabetics, keeping server order
