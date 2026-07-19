@@ -34,6 +34,7 @@ from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.coordinate import Coordinate
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, OptionList, RichLog, Static, TabbedContent, TabPane
@@ -558,6 +559,8 @@ class QsqlApp(App):
                 continue
             self._render_pane(idx, table)
 
+    _SELECT_MARK = "▸"
+
     def _render_pane(self, idx: int, table: DataTable) -> None:
         active = idx == self.active_pane
         sheet = self.panes[idx][-1]
@@ -570,7 +573,22 @@ class QsqlApp(App):
         window = cols[start : start + self.MAX_DATA_COLS]
         shown = (sheet.frame, sheet.hidden, sheet.selected, start)
         prev = self._data_shown[idx]
-        if prev is None or prev[0] is not shown[0] or prev[1:] != shown[1:]:
+        selection_only = (
+            prev is not None
+            and window
+            and prev[0] is shown[0]
+            and prev[1] == shown[1]
+            and prev[3] == shown[3]
+            and prev[2] != shown[2]
+        )
+        if selection_only:
+            # same content and columns, only the marked rows differ: flip just
+            # those cells' markers. A clear()+rebuild would set Textual's
+            # _require_update_dimensions, which defers the cursor re-scroll a
+            # frame and makes a scrolled viewport visibly jump on select.
+            self._data_shown[idx] = shown
+            self._restyle_selection(table, sheet, prev[2], window[0], cap)
+        elif prev is None or prev[0] is not shown[0] or prev[1:] != shown[1:]:
             # rebuild only when content or the column window changed; wide
             # frames make rebuilds expensive and cursor moves happen per keypress
             self._data_shown[idx] = shown
@@ -578,7 +596,7 @@ class QsqlApp(App):
             if cap is not None:
                 frame = frame.head(cap)
             rows = [
-                (("▸" if i in sheet.selected else "") + str(row[0]), *map(str, row[1:]))
+                ((self._SELECT_MARK if i in sheet.selected else "") + str(row[0]), *map(str, row[1:]))
                 for i, row in enumerate(frame.rows())
             ]
             table.clear(columns=True)
@@ -595,6 +613,19 @@ class QsqlApp(App):
                 span = f" · cols {start + 1}-{start + len(window)}/{len(cols)}"
             side = ("L / " if self.active_pane == 0 else "R / ") if self.split else ""
             self.sub_title = f"{side}{sheet.title} · {sheet.frame.height}x{len(cols)}{picked}{span}"
+
+    def _restyle_selection(
+        self, table: DataTable, sheet: Sheet, prev_selected: frozenset[int], col0: str, cap: int | None
+    ) -> None:
+        """Repaint just the first-column cells whose selection flipped, marker
+        on or off — update_cell_at(update_width=False) touches only cell content,
+        so the table keeps its dimensions and scroll and the viewport holds still."""
+        limit = sheet.frame.height if cap is None else min(sheet.frame.height, cap)
+        values = sheet.frame[col0]
+        for i in sorted(prev_selected ^ sheet.selected):
+            if 0 <= i < limit:
+                mark = self._SELECT_MARK if i in sheet.selected else ""
+                table.update_cell_at(Coordinate(i, 0), mark + str(values[i]), update_width=False)
 
     def _column_widths(
         self, window: list[str], rows: list[tuple[str, ...]], active: bool = True
