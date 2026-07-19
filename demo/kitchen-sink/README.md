@@ -15,6 +15,12 @@ The compendia NDCs match the pharmacy-claims seed exactly, so the cross-engine
 join in `class_spend` hits on every row. All data is synthetic and
 deterministic (`generate_series`, no `random()`); nothing is PHI.
 
+Emulator gotcha: goccy can't *execute* BigQuery pipe-syntax (`|>`) queries —
+they parse, then die in its sqlite translation layer with a retryable-looking
+`jobInternalError`. Keep emulator cells on standard syntax. (quicksql disables
+client retries for endpoint-configured cells, so such failures surface
+immediately instead of retrying for ten minutes.)
+
 ## Quickstart
 
 The stack uses the **same ports (5432, 9050) as the repo-root compose** — stop

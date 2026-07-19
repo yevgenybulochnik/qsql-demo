@@ -43,16 +43,31 @@ class BigQueryExecutor(Executor):
             )
         return bigquery.Client(project=spec.get("project"))
 
+    def _query_opts(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Fail fast against a local emulator: goccy reports every execution
+        failure with a retryable-looking reason (jobInternalError), so the
+        client's default 600s job retry re-submits a failing query for ten
+        minutes — and a down emulator blocks the same way via the API retry.
+        Real BigQuery (no endpoint) keeps the client defaults."""
+        if not spec.get("endpoint"):
+            return {}
+        return {"retry": None, "job_retry": None}
+
     def _session_state(self, cell: RenderedCell, ctx: RunContext, spec: dict[str, Any]) -> dict:
         """Per-context BigQuery session (temp tables live in it; sessions
         auto-expire server-side, so close() is a no-op)."""
         if ctx.session is None:
-            return {"client": self.make_client(spec), "session_id": None}
+            return {
+                "client": self.make_client(spec),
+                "session_id": None,
+                "query_opts": self._query_opts(spec),
+            }
         key = self.context_key(cell.config)
         if key not in ctx.session.engine_sessions:
             ctx.session.engine_sessions[key] = {
                 "client": self.make_client(spec),
                 "session_id": None,
+                "query_opts": self._query_opts(spec),
             }
         return ctx.session.engine_sessions[key]
 
@@ -69,7 +84,9 @@ class BigQueryExecutor(Executor):
         )
 
     def _query(self, state: dict, sql: str) -> Any:
-        job = state["client"].query(sql, job_config=self._job_config(state))
+        job = state["client"].query(
+            sql, job_config=self._job_config(state), **state["query_opts"]
+        )
         # query() only *submits*; sessions allow one active job at a time, so
         # wait for completion before the next statement goes in
         job.result()
@@ -93,5 +110,5 @@ class BigQueryExecutor(Executor):
             state = self._session_state(cell, ctx, spec)
             table = self._query(state, sql).to_arrow()
         else:  # no in-context participation: one plain job, as before
-            table = self.make_client(spec).query(sql).to_arrow()
+            table = self.make_client(spec).query(sql, **self._query_opts(spec)).to_arrow()
         return register_frame(ctx, result_view(cell.name), table)
