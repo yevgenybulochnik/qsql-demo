@@ -382,6 +382,49 @@ async def test_data_table_not_rebuilt_on_cursor_moves(notebook) -> None:
         assert rebuilds
 
 
+async def test_selection_toggle_updates_marker_without_rebuild(tmp_path) -> None:
+    # toggling a row's selection must not clear+rebuild the table. The rebuild
+    # sets Textual's _require_update_dimensions, which defers the cursor
+    # re-scroll by a frame and makes a scrolled viewport visibly jump. A
+    # selection change only flips one row's marker cell, so update it in place.
+    from textual.coordinate import Coordinate
+
+    nb = tmp_path / "tall.qsql"
+    nb.write_text("-- @engine: duckdb\n-- @cell big\nSELECT range AS n FROM range(80);\n")
+    app = QsqlApp(path=nb, watch=False, auto_run=False)
+    async with app.run_test(size=(80, 16)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")  # dive into the data sheet
+        await pilot.pause()
+        table = app.query_one("#data", DataTable)
+
+        # scroll deep, then move the cursor into the visible window: a spurious
+        # re-scroll would be plainly visible this far down the sheet
+        table.scroll_to(y=table.max_scroll_y, animate=False)
+        await pilot.pause()
+        await pilot.press("j")
+        row = app.sheet_stack[-1].cursor[0]
+        assert row > 1
+
+        rebuilds: list[int] = []
+        original = table.clear
+        table.clear = lambda *a, **kw: (rebuilds.append(1), original(*a, **kw))[1]
+
+        await pilot.press("s")  # toggle-select the current row
+        await pilot.pause()
+        assert not rebuilds  # selection reuses the rendered table (no clear)
+        assert row in app.sheet_stack[-1].selected
+        assert str(table.get_cell_at(Coordinate(row, 0))).startswith("▸")
+
+        await pilot.press("s")  # toggle back off — still no rebuild, marker gone
+        await pilot.pause()
+        assert not rebuilds
+        assert row not in app.sheet_stack[-1].selected
+        assert not str(table.get_cell_at(Coordinate(row, 0))).startswith("▸")
+
+
 async def test_keyboard_move_resumes_from_viewport_after_mouse_scroll(tmp_path) -> None:
     # the mouse wheel scrolls the data table's viewport but not the Sheet
     # cursor; a following j/k must resume from what's on screen, not snap the
