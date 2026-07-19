@@ -677,6 +677,28 @@ def test_completion_derives_cte_alias_columns_from_its_projection(tmp_path) -> N
     assert labels == {"user_id", "member_name"}
 
 
+def test_completion_offers_dialect_function_vocabulary(tmp_path) -> None:
+    """The completion word list is dialect-aware: a bigquery cell offers
+    BigQuery function names as kind "function" — both sqlglot-known ones
+    (RANGE_BUCKET) and the range-family TVFs BigQuery registers on top of
+    ZetaSQL that sqlglot's tables don't carry (RANGE_SESSIONIZE) — while a
+    duckdb cell gets duckdb's vocabulary without bigquery-only names."""
+    from quicksql.lsp.analysis import Analyzer
+
+    text = "-- @engine: bigquery\n-- @cell c\nSELECT \n"
+    comps = Analyzer().completions(text, tmp_path, 2, len("SELECT "))
+    funcs = {c.label for c in comps if c.kind == "function"}
+    assert "RANGE_SESSIONIZE" in funcs
+    assert "RANGE_BUCKET" in funcs
+    assert "SELECT" in {c.label for c in comps if c.kind == "keyword"}
+
+    text2 = "-- @engine: duckdb\n-- @cell c\nSELECT \n"
+    comps2 = Analyzer().completions(text2, tmp_path, 2, len("SELECT "))
+    funcs2 = {c.label for c in comps2 if c.kind == "function"}
+    assert funcs2  # duckdb has its own function vocabulary
+    assert "RANGE_SESSIONIZE" not in funcs2
+
+
 def test_server_sorts_columns_above_keywords() -> None:
     """Clients sort by sortText when present; fields must rank above tables,
     refs, and keywords regardless of label alphabetics, keeping server order
