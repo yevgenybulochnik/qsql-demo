@@ -46,6 +46,35 @@ def test_source_and_opaque_expressions_are_tagged() -> None:
     assert any(isinstance(t, Opaque) for t in tags)  # var(...) is opaque
 
 
+def test_opaque_expression_masks_to_a_parseable_placeholder() -> None:
+    """`> {{ var('startdate') }}` blanked to spaces left a dangling operator,
+    so sqlglot reported a false `Required keyword: 'expression' missing` on a
+    line that is fine at runtime. Opaque expressions must read as a value."""
+    import sqlglot
+
+    sql = "SELECT * FROM orders WHERE order_date > {{ var('startdate') }}"
+    masked, _ = mask_jinja(sql)
+    assert len(masked) == len(sql)
+    sqlglot.parse(masked, dialect="duckdb")  # must not raise
+
+
+def test_known_var_value_substitutes_in_place_when_it_fits() -> None:
+    """With the cell's vars available, a bare {{ var('key') }} becomes the
+    value the runtime render would produce (space-padded to the run's length),
+    so the LSP parses what the engine will actually see."""
+    sql = "SELECT * FROM t WHERE order_date > {{ var('startdate') }}"
+    masked, _ = mask_jinja(sql, {"startdate": "2026-01-01"})
+    assert len(masked) == len(sql)
+    assert "order_date > 2026-01-01" in masked
+
+
+def test_var_value_longer_than_its_run_falls_back_to_placeholder() -> None:
+    sql = "SELECT * FROM t WHERE a > {{ var('x') }}"
+    masked, _ = mask_jinja(sql, {"x": "y" * 50})
+    assert len(masked) == len(sql)
+    assert "y" * 50 not in masked
+
+
 def test_control_and_multiline_blocks_blank_to_spaces_keeping_newlines() -> None:
     sql = "SELECT 1\n{% if a\n   and b %}\nWHERE x{% endif %}"
     masked, spans = mask_jinja(sql)
@@ -146,6 +175,19 @@ def test_diagnostics_surface_sqlglot_syntax_errors(tmp_path) -> None:
     text = "-- @engine: duckdb\n-- @cell a\nSELECT * FROM WHERE 1;\n"
     diags = Analyzer().diagnostics(text, tmp_path)
     assert any(d.source == "sqlglot" for d in diags)
+
+
+def test_diagnostics_accept_var_in_operand_position(tmp_path) -> None:
+    """A var used as a comparison operand must not produce a syntax error;
+    the cell's merged vars feed the mask so the parsed SQL carries the value."""
+    from quicksql.lsp.analysis import Analyzer
+
+    text = (
+        "-- @vars: {startdate: '2026-01-01'}\n"
+        "-- @cell a\n"
+        "SELECT * FROM orders WHERE order_date > {{ var('startdate') }};\n"
+    )
+    assert Analyzer().diagnostics(text, tmp_path) == []
 
 
 def test_diagnostics_warn_on_repeated_directive_keys(tmp_path) -> None:
