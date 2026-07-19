@@ -6,12 +6,10 @@ form a dependency DAG, run on pluggable **engines** (DuckDB, SQLite, Postgres, B
 through pluggable **sinks** (parquet files, DuckDB tables, Postgres tables) that also
 define how downstream cells read them back.
 
-![quicksql TUI: Postgres cells, a cross-engine DuckDB cell, an nvim edit triggering an autorun rerun, and the VisiData deep-dive](demo/quicksql-demo.gif)
-
-*Two cells run in Postgres, next to the data; the DuckDB cell joins their results. Editing
-the SQL in nvim reruns just the changed cell and its downstream — `top_customers` is
-untouched while `shipped_by_tier` and `tier_share` go 3 rows → 2. `V` opens the landed
-parquet in VisiData. Recorded by [`demo/demo.tape`](demo/README.md).*
+Want to see it running? [`demo/`](demo/README.md) holds self-contained demos
+with their own docker compose backends and seed data — start with
+[`demo/kitchen-sink/`](demo/kitchen-sink/README.md): Postgres claims, BigQuery
+drug compendia, and DuckDB joining them cross-engine.
 
 ```sql
 -- @engine: duckdb

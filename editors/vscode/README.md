@@ -34,7 +34,7 @@ notebooks live.
 npm install
 npm run compile        # typecheck + bundle to out/extension.js
 npm test               # grammar scope tests (tests/*.qsql)
-code --extensionDevelopmentPath="$PWD" ../../examples/pipeline.qsql
+code --extensionDevelopmentPath="$PWD" ../../demo/kitchen-sink/kitchen-sink.qsql
 ```
 
 The grammar test harness (`vscode-tmgrammar-test`) prints

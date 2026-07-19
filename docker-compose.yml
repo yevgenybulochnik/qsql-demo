@@ -7,7 +7,7 @@
 #   quicksql        — long-lived data: stress seeds, manual TUI sessions
 #   quicksql_test   — pytest's sandbox (tests create/drop their own tables)
 #   quicksql_claims — synthetic healthcare claims for smoke tests
-#                 (seed per examples/claims_seed.sql)
+#                 (seed per demo/kitchen-sink/pg-init/10-claims-core.sql)
 # The named volume keeps seeded data across `docker compose down` and reboots.
 #
 # bigquery-emulator — goccy's BigQuery API emulator (REST on :9050), project
