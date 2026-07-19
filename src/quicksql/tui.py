@@ -816,6 +816,12 @@ class QsqlApp(App):
                     self._cancel_filter()
                 self._hide_search()
             return
+        if event.key == "enter" and not self.query_one("#cells", DataTable).has_focus:
+            # with #cells focused the DataTable consumes Enter and emits
+            # RowSelected; once focus wanders (Tab, a click on the tab bar)
+            # the key bubbles here instead — same behavior either way
+            self._activate_current_row()
+            return
         ch = event.character
         if self._pending_g:
             self._pending_g = False
@@ -969,6 +975,9 @@ class QsqlApp(App):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "cells":
             return
+        self._activate_current_row()
+
+    def _activate_current_row(self) -> None:
         if self.mode == "data" and self.sheet_stack and self.sheet_stack[-1].drill is not None:
             self._drill_current()  # Enter on a catalog sheet goes deeper
             return
