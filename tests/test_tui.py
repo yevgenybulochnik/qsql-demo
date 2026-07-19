@@ -469,6 +469,33 @@ async def test_catalog_browser_opens_drills_and_pops(notebook) -> None:
         assert app.mode == "cells"
 
 
+async def test_enter_drills_even_when_the_cells_table_lost_focus(notebook) -> None:
+    """A Tab press (or a mouse click on the tab bar) moves focus off the
+    #cells DataTable; every other key kept working because it's handled at
+    app level, but Enter rode on the table's RowSelected event and silently
+    died — no drill, no error. Enter must behave the same regardless of
+    which widget has focus."""
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.sheet_stack[-1].title == "catalog"
+        await pilot.press("j")  # onto the first output row
+        await pilot.press("tab")  # focus wanders off the cells table
+        assert not app.query_one("#cells", DataTable).has_focus
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(app.sheet_stack) == 2  # the drill still happened
+        assert app.sheet_stack[-1].frame.columns == [
+            "column", "field_path", "type", "mode", "description",
+        ]
+
+
 async def test_catalog_cache_serves_redrills_and_ctrl_r_refetches(notebook) -> None:
     app = QsqlApp(path=notebook, watch=False, auto_run=False)
     async with app.run_test(size=(100, 40)) as pilot:
