@@ -23,8 +23,9 @@ immediately instead of retrying for ten minutes.)
 
 ## Quickstart
 
-The stack uses the **same ports (5432, 9050) as the repo-root compose** — stop
-that one first (`docker compose down` at the repo root).
+The stack runs on offset host ports — Postgres on **5433**, the emulator on
+**9051** — so it coexists with the repo-root pytest stack (5432/9050); both
+can be up at the same time.
 
 ```console
 $ docker compose -f demo/kitchen-sink/docker-compose.yml up -d --wait

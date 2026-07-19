@@ -8,6 +8,6 @@ by the test suite (the repo-root `docker-compose.yml` is the pytest stack).
 |---|---|
 | [`kitchen-sink/`](kitchen-sink/) | the works — Postgres claims warehouse (incl. a 250-column table), BigQuery-emulator drug compendia, cross-engine DuckDB joins, vars, DuckDB sink, autorun |
 
-Heads-up: the demo compose stacks reuse the root stack's ports (5432, 9050),
-so stop one before starting the other (`docker compose down` at the repo root,
-or `docker compose -f demo/<name>/docker-compose.yml down`).
+Demo stacks run on offset host ports (kitchen-sink: Postgres 5433, bigquery
+emulator 9051) so they coexist with the root pytest stack on 5432/9050 —
+no need to stop one to run the other.

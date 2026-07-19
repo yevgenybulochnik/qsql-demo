@@ -2,25 +2,25 @@
 #
 #   docker compose -f demo/kitchen-sink/docker-compose.yml up -d --wait
 #
-# Uses the SAME ports (5432, 9050) as the repo-root compose stack — the two
-# are mutually exclusive. `docker compose down` at the repo root first.
+# Runs on OFFSET host ports (postgres 5433, bigquery 9051) so it coexists
+# with the repo-root pytest stack (5432, 9050) — both can be up at once.
 #
 # postgres — single database `quicksql_claims`, seeded on first boot of an
 # empty volume by ./pg-init (claims core tables + the 250-column
 # claims.claims_837_wide extract). The named volume keeps the seed across
 # `down`; `down -v` to force a reseed.
 #
-# bigquery-emulator — goccy's BigQuery API emulator (REST on :9050), project
-# `quicksql-test`, seeded from ./bq-seed/compendia.yaml at startup. State is
-# in-memory: every restart reseeds identically from the YAML. Point a cell at
-# it with `input: { bigquery: { project: quicksql-test, endpoint:
-# http://localhost:9050 } }`.
+# bigquery-emulator — goccy's BigQuery API emulator (REST on host :9051),
+# project `quicksql-test`, seeded from ./bq-seed/compendia.yaml at startup.
+# State is in-memory: every restart reseeds identically from the YAML. Point
+# a cell at it with `input: { bigquery: { project: quicksql-test, endpoint:
+# http://localhost:9051 } }`.
 
 services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_USER: quicksql
       POSTGRES_PASSWORD: quicksql
@@ -43,7 +43,7 @@ services:
     image: ghcr.io/goccy/bigquery-emulator:latest
     command: ["--project=quicksql-test", "--data-from-yaml=/seed/compendia.yaml"]
     ports:
-      - "9050:9050"
+      - "9051:9050"
     volumes:
       - ./bq-seed/compendia.yaml:/seed/compendia.yaml:ro
 

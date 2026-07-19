@@ -1,7 +1,7 @@
 /*@
 input:
   postgres:
-    dsn: postgresql://quicksql:quicksql@localhost:5432/quicksql_claims
+    dsn: postgresql://quicksql:quicksql@localhost:5433/quicksql_claims
 output:
   type: parquet
   dir: data/
@@ -49,7 +49,7 @@ GROUP BY ndc;
 
 -- @cell drug_reference
 -- @engine: bigquery
-/*@ input: { bigquery: { project: quicksql-test, endpoint: http://localhost:9050 } } */
+/*@ input: { bigquery: { project: quicksql-test, endpoint: http://localhost:9051 } } */
 -- One row per NDC: directory attributes, therapeutic class, latest price.
 SELECT d.ndc,
        d.drug_name,

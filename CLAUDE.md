@@ -59,8 +59,8 @@ first `@cell`) inherited by every cell.
   `QUICKSQL_TEST_PG_DSN` / `QUICKSQL_TEST_BQ_ENDPOINT`. Everything except the
   network-gated tests: `uv run --extra postgres --extra bigquery pytest -m "not network"`
   — an explicit `-m` overrides the default deselection. The standalone demo stack
-  `demo/kitchen-sink/docker-compose.yml` reuses ports 5432/9050 — mutually exclusive
-  with this one; stop one before starting the other.
+  `demo/kitchen-sink/docker-compose.yml` runs on offset ports (5433/9051) and can
+  stay up alongside this one.
 - `uv run quicksql` (bare = init) | `init` | `run` | `watch` | `tui` | `list` | `show <cell>` |
   `compile` — default file `base.qsql`; `--set key.path=value` repeatable. `quicksql tui`
   with a missing file opens a notebook picker: existing .qsql/.qsql.sql files plus
