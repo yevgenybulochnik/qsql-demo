@@ -19,7 +19,7 @@ from sqlglot.errors import ErrorLevel, ParseError
 from ..compiler import compile_text
 from ..errors import ConfigErrorGroup, CycleError, ParseError as QsqlParseError, QsqlError
 from .googlesql import find_execute_query, parse_errors
-from .mask import Ref, Source, mask_jinja
+from .mask import Opaque, Ref, Source, mask_jinja
 from .schema import SchemaCache, columns_for, relation_names
 
 # quicksql engine names line up with sqlglot dialect names
@@ -192,7 +192,7 @@ def _syntax_diagnostics(cell: Any, gsql_bin: str | None = None) -> list[Diagnost
     dialect = _DIALECT.get(cell.engine)
     if dialect is None or "{%" in cell.source:
         return []  # control-flow Jinja can't be masked into valid SQL (v1 limit)
-    masked, _ = mask_jinja(cell.source)
+    masked, _ = mask_jinja(cell.source, _cell_vars(cell))
     if dialect == "bigquery" and gsql_bin is not None:
         hits = parse_errors(gsql_bin, masked)
         if hits is not None:  # None: tool failed, fall through to sqlglot
@@ -227,6 +227,11 @@ def _syntax_diagnostics(cell: Any, gsql_bin: str | None = None) -> list[Diagnost
     return []
 
 
+def _cell_vars(cell: Any) -> dict[str, Any]:
+    """The cell's merged ``vars:`` for in-place mask substitution."""
+    return getattr(cell.config, "vars", None) or {}
+
+
 def _cell_at(project: Any, line1: int) -> Any | None:
     for cell in project.cells.values():
         if cell.line <= line1 <= cell.line_end:
@@ -254,7 +259,7 @@ def _resolve_scope(project: Any, cell: Any, source: str | None = None) -> dict[s
     ``{{ ref/source }}`` placeholder, a Projection for a CTE alias, else the
     (qualified) table-name string."""
     dialect = _DIALECT.get(cell.engine)
-    masked, spans = mask_jinja(source if source is not None else cell.source)
+    masked, spans = mask_jinja(source if source is not None else cell.source, _cell_vars(cell))
     by_placeholder = {s.name: s.tag for s in spans if s.name}
     try:
         tree = sqlglot.parse_one(masked, dialect=dialect, error_level=ErrorLevel.IGNORE)
@@ -267,8 +272,11 @@ def _resolve_scope(project: Any, cell: Any, source: str | None = None) -> dict[s
         key = (table.alias_or_name or "").lower()
         if not key:
             continue
-        if table.name in by_placeholder:  # a {{ ref/source }} placeholder
-            scope[key] = by_placeholder[table.name]
+        if table.name in by_placeholder:  # a {{ }} placeholder
+            tag = by_placeholder[table.name]
+            if isinstance(tag, Opaque):
+                continue  # unknown value — no columns to offer for the alias
+            scope[key] = tag
         else:  # engine-native table, keep catalog (bigquery project) and
             # schema qualifiers
             qualified = [table.catalog, table.db, table.name]
