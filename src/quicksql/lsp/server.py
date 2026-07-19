@@ -19,14 +19,16 @@ _KIND = {
     "reference": types.CompletionItemKind.Reference,
     "keyword": types.CompletionItemKind.Keyword,
     "table": types.CompletionItemKind.Struct,
+    "function": types.CompletionItemKind.Function,
 }
 _SEVERITY = {
     "error": types.DiagnosticSeverity.Error,
     "warning": types.DiagnosticSeverity.Warning,
 }
-# clients sort by sortText when present: columns above tables/refs, SQL
-# keywords last, server order preserved within each kind
-_SORT_RANK = {"field": "0", "table": "1", "reference": "2", "keyword": "3"}
+# clients sort by sortText when present: columns above tables/refs, then SQL
+# keywords, the dialect function vocabulary last; server order preserved
+# within each kind
+_SORT_RANK = {"field": "0", "table": "1", "reference": "2", "keyword": "3", "function": "4"}
 
 
 def _to_lsp_diagnostic(d: Diagnostic) -> types.Diagnostic:

@@ -19,6 +19,7 @@ from sqlglot.errors import ErrorLevel, ParseError
 from ..compiler import compile_text
 from ..errors import ConfigErrorGroup, CycleError, ParseError as QsqlParseError, QsqlError
 from .googlesql import find_execute_query, parse_errors
+from . import vocab
 from .mask import Opaque, Ref, Source, mask_jinja
 from .schema import SchemaCache, columns_for, relation_names
 
@@ -27,14 +28,6 @@ _DIALECT = {"duckdb": "duckdb", "postgres": "postgres", "sqlite": "sqlite", "big
 
 # cursor in table-reference position: FROM/JOIN + partial dotted path
 _TABLE_POS = re.compile(r"\b(?:from|join)\s+`?([\w.\-]*)$", re.IGNORECASE)
-
-_KEYWORDS = [
-    "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET",
-    "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "ON", "USING",
-    "AS", "AND", "OR", "NOT", "IN", "IS NULL", "IS NOT NULL", "CASE", "WHEN", "THEN",
-    "ELSE", "END", "DISTINCT", "UNION", "UNION ALL", "WITH", "OVER", "PARTITION BY",
-]
-
 
 @dataclass
 class Diagnostic:
@@ -50,7 +43,7 @@ class Diagnostic:
 @dataclass
 class Completion:
     label: str
-    kind: str  # "field" | "reference" | "keyword"
+    kind: str  # "field" | "reference" | "table" | "keyword" | "function"
     detail: str = ""
 
 
@@ -116,7 +109,9 @@ class Analyzer:
                 if names:
                     return [Completion(n, "table", detail) for n, detail in names]
 
-        items = [Completion(k, "keyword") for k in _KEYWORDS]
+        dialect = _DIALECT.get(cell.engine) if cell is not None else None
+        items = [Completion(k, "keyword") for k in vocab.keywords(dialect)]
+        items += [Completion(f, "function") for f in vocab.functions(dialect)]
         if cell is None:
             return items
 
