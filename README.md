@@ -272,9 +272,10 @@ and the catalog for schema introspection.
 
 - **Diagnostics:** unknown `ref()`/`depends_on`, cross-context refs that must run on DuckDB,
   bad directive YAML, cycles, and per-dialect SQL syntax errors.
-- **Completion:** columns of the tables/`ref()`/`source()` in a cell (alias-scoped),
-  `ref('…')` cell names, dialect-aware keywords and functions; BigQuery cells complete
-  dataset/table relation paths against a live connection.
+- **Completion:** columns of the tables/`ref()`/`source()` in scope (alias-scoped, and
+  narrowed to the cursor's statement in a multi-statement cell), `ref('…')` cell names,
+  dialect-aware keywords and functions; BigQuery cells complete dataset/table relation
+  paths against a live connection.
 - **Go-to-definition** on `ref('cell')` and **document symbols** for the cell outline.
 
 Clients live in [`editors/`](editors/README.md): a VS Code extension (TextMate grammar +

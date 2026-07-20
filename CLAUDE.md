@@ -18,7 +18,9 @@ first `@cell`) inherited by every cell.
   whole body in one job); `supports_multistatement_materialization=False` makes the compiler
   reject a multi-statement BigQuery cell that is reffed in-context. Postgres/SQLite keep
   autocommit, so a mid-cell failure leaves earlier statements' effects (documented, by
-  design). LSP completion still parses only the first statement (diagnostics parse all).
+  design). LSP column completion is statement-scoped: `_resolve_scope` slices the masked
+  source to the cursor's statement (`statement_spans` offsets on the raw source) before
+  `parse_one`, so a sibling statement's tables/aliases don't leak into scope.
 - **Sinks are the cross-cell interchange.** Each cell lands via its sink (default
   `data/<cell>.parquet`); `Sink.ref_expr()` tells downstream cells how to read it back
   (read_parquet, ATTACHed duckdb/postgres table, ...). The `none` sink lands nothing.
