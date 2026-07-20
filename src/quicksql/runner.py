@@ -156,7 +156,8 @@ def base_runner(project: Project) -> Inner:
                 ctx.emit("cell_step", cell.name, "materialized temp for downstream refs")
             ctx.emit("cell_step", cell.name, f"landing via {cell.sink_type}")
             rows, target = sink.write(cell, view, ctx.conn)
-            preview = _preview(ctx.conn, sink.ref_expr(cell.name))
+            # effect-only sinks (none) land nothing, so there's nothing to read back
+            preview = _preview(ctx.conn, sink.ref_expr(cell.name)) if sink.lands_output else pl.DataFrame()
             ctx.emit("cell_step", cell.name, f"preview cached ({preview.height} rows)")
             return RunResult(
                 cell=cell.name,

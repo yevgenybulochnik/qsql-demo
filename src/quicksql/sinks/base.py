@@ -18,6 +18,7 @@ from ..models import RenderedCell
 class Sink(ABC):
     name: ClassVar[str] = ""
     requires: ClassVar[list[str]] = []  # duckdb extensions, e.g. "postgres"
+    lands_output: ClassVar[bool] = True  # False for effect-only sinks (none)
 
     def __init__(self, cfg: dict[str, Any], root: Path) -> None:
         self.cfg = cfg

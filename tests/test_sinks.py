@@ -1,7 +1,7 @@
 import duckdb
 import pytest
 
-from quicksql.errors import SinkError
+from quicksql.errors import ConfigError, SinkError
 from quicksql.models import RenderedCell
 from quicksql.registry import SINKS
 
@@ -106,3 +106,17 @@ def test_postgres_sink_missing_dsn_raises(tmp_path) -> None:
     sink = SINKS.get("postgres")({}, tmp_path)
     with pytest.raises(SinkError, match="dsn"):
         sink.dsn
+
+
+def test_none_sink_lands_nothing_and_is_unreadable(conn, tmp_path) -> None:
+    sink = SINKS.get("none")({}, tmp_path)
+    assert sink.lands_output is False
+    rows, target = sink.write(_cell("effect"), "v", conn)
+    assert rows == 0  # nothing lands; the view is ignored
+    with pytest.raises(ConfigError, match="lands nothing"):
+        sink.ref_expr("effect")
+
+
+def test_landing_sinks_report_lands_output_true(tmp_path) -> None:
+    assert SINKS.get("parquet")({}, tmp_path).lands_output is True
+    assert SINKS.get("duckdb")({"path": "w.db"}, tmp_path).lands_output is True
