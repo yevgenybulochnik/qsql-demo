@@ -67,6 +67,45 @@ def test_extensions_directive_trips_guardrail_on_non_duckdb_cell(tmp_path) -> No
         )
 
 
+def test_ref_to_none_sink_cell_rejected(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="lands nothing"):
+        compile_text(
+            "-- @cell effect\n-- @output: { type: none }\nCREATE TABLE t AS SELECT 1 AS n;\n"
+            "-- @cell reader\nSELECT * FROM {{ ref('effect') }};",
+            root=tmp_path,
+        )
+
+
+def test_depends_on_to_none_sink_cell_allowed(tmp_path) -> None:
+    # ordering-only dependency reads no data, so it's fine to depend on an effect-only cell
+    project = compile_text(
+        "-- @cell effect\n-- @output: { type: none }\nCREATE TABLE t AS SELECT 1 AS n;\n"
+        "-- @cell after\n-- @depends_on: [effect]\nSELECT 2 AS m;",
+        root=tmp_path,
+    )
+    assert "effect" in project.cells["after"].depends_on
+
+
+def test_reffed_multistatement_bigquery_rejected(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="single statement"):
+        compile_text(
+            "/*@ input: { bigquery: { project: p } } */\n"
+            "-- @cell parent\nCREATE TEMP TABLE s AS SELECT 1 AS n; SELECT n FROM s;\n"
+            "-- @cell child\nSELECT count(*) AS c FROM {{ ref('parent') }};",
+            root=tmp_path,
+        )
+
+
+def test_reffed_single_statement_bigquery_compiles(tmp_path) -> None:
+    project = compile_text(
+        "/*@ input: { bigquery: { project: p } } */\n"
+        "-- @cell parent\nSELECT 1 AS n;\n"
+        "-- @cell child\nSELECT count(*) AS c FROM {{ ref('parent') }};",
+        root=tmp_path,
+    )
+    assert project.cells["parent"].reffed_in_context is True
+
+
 def test_extensions_union_config_and_render_collected(tmp_path) -> None:
     project = compile_text(
         "-- @cell a\n-- @extensions: [spatial]\nSELECT * FROM {{ source('s.xlsx') }};",

@@ -9,6 +9,7 @@ from typing import Any
 from .bootstrap import load_builtins
 from .config import resolve_cell, resolve_engine, resolve_global, resolve_sink_type
 from .errors import CellError, ConfigError, ConfigErrorGroup
+from .executors.base import split_statements
 from .graph import topo_sort
 from .models import RawBlock, RenderedCell, RunResult
 from .parser import body_hash, parse_text
@@ -146,6 +147,31 @@ def compile_text(
     referenced_in_context = {name for c in cells.values() for name in c.context_refs}
     for cell in cells.values():
         cell.reffed_in_context = cell.name in referenced_in_context
+
+    # stage 3: cross-cell semantic checks that need every cell's sink/engine known
+    semantic: list[CellError] = []
+    for cell in cells.values():
+        # an effect-only (sink 'none') cell lands nothing, so it can't be read back;
+        # only ref()/source() edges read data — a plain @depends_on ordering edge is fine.
+        for name in [*cell.context_refs, *cell.external_refs]:
+            if cells[name].sink_type == "none":
+                semantic.append(
+                    CellError(cell.name, cell.line, f"cannot ref({name!r}): it uses sink "
+                              "'none' and lands nothing")
+                )
+        # a reffed-in-context cell is materialized as a temp from its terminal
+        # statement; engines with native scripting can't be split to isolate it.
+        if (
+            cell.reffed_in_context
+            and not EXECUTORS.get(cell.engine).supports_multistatement_materialization
+            and len(split_statements(cell.sql, cell.engine)) > 1
+        ):
+            semantic.append(
+                CellError(cell.name, cell.line, f"a {cell.engine} cell referenced "
+                          "in-context must be a single statement")
+            )
+    if semantic:
+        raise ConfigErrorGroup(where, semantic)
 
     order = topo_sort(list(cells), {n: c.depends_on for n, c in cells.items()})
     warnings = [
