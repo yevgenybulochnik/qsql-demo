@@ -5,7 +5,7 @@ import duckdb
 import polars as pl
 import pytest
 
-from quicksql.config import resolve_cell
+from quicksql.config import resolve_cell, resolve_sink_type
 from quicksql.errors import ExecutorError
 from quicksql.executors.bigquery_exec import BigQueryExecutor
 from quicksql.executors.postgres_exec import PostgresExecutor
@@ -17,7 +17,7 @@ def _cell(name: str, sql: str, cell_raw: dict | None = None) -> RenderedCell:
     cfg = resolve_cell({}, cell_raw or {})
     return RenderedCell(
         name=name, config=cfg, sql_raw=sql, sql=sql, hash="",
-        engine="duckdb", sink_type="parquet",
+        engine="duckdb", sink_type=resolve_sink_type(cfg),
     )
 
 
@@ -26,6 +26,73 @@ def ctx(tmp_path):
     conn = duckdb.connect()
     yield RunContext(conn=conn, root=tmp_path)
     conn.close()
+
+
+def test_split_statements_splits_on_top_level_semicolons() -> None:
+    from quicksql.executors.base import split_statements
+
+    assert split_statements("SELECT 1; SELECT 2", "duckdb") == ["SELECT 1", "SELECT 2"]
+
+
+def test_split_statements_preserves_original_text_verbatim() -> None:
+    from quicksql.executors.base import split_statements
+
+    # sqlglot re-rendering would uppercase LIST_TRANSFORM and space out x+1;
+    # slicing the original text must return it byte-for-byte.
+    sql = "SELECT list_transform(xs, x -> x+1) AS ys"
+    assert split_statements(sql, "duckdb") == [sql]
+
+
+def test_split_statements_ignores_semicolons_in_strings_and_comments() -> None:
+    from quicksql.executors.base import split_statements
+
+    assert split_statements("SELECT 'a;b' AS x", "duckdb") == ["SELECT 'a;b' AS x"]
+    assert split_statements("SELECT 1 /* a;b */; SELECT 2", "duckdb") == [
+        "SELECT 1 /* a;b */",
+        "SELECT 2",
+    ]
+
+
+def test_split_statements_drops_trailing_semicolon_and_blanks() -> None:
+    from quicksql.executors.base import split_statements
+
+    assert split_statements("SELECT 1;", "duckdb") == ["SELECT 1"]
+    assert split_statements("SELECT 1;;\n; SELECT 2;", "duckdb") == ["SELECT 1", "SELECT 2"]
+
+
+def test_split_statements_falls_back_on_unparseable() -> None:
+    from quicksql.executors.base import split_statements
+
+    # an unterminated string literal makes the tokenizer raise; treat the whole
+    # body as one statement rather than blowing up.
+    assert split_statements("SELECT 'oops", "duckdb") == ["SELECT 'oops"]
+
+
+def test_split_statements_drops_comment_only_tail() -> None:
+    from quicksql.executors.base import split_statements
+
+    # a trailing semicolon followed by only comments (e.g. a rendered {% if %}
+    # that collapsed, then help comments) must not become a phantom statement.
+    body = "SELECT u.name\nFROM users u\n;\n\n-- Things to try:\n--   * something\n"
+    assert split_statements(body, "duckdb") == ["SELECT u.name\nFROM users u"]
+
+
+def test_executor_split_policy_bigquery_never_splits() -> None:
+    body = "CREATE TEMP TABLE t AS SELECT 1; SELECT * FROM t"
+    assert EXECUTORS.get("duckdb").split_statements(body) == [
+        "CREATE TEMP TABLE t AS SELECT 1",
+        "SELECT * FROM t",
+    ]
+    # bigquery has native scripting; splitting client-side would lose session
+    # state, so it sends the whole body as one job.
+    assert EXECUTORS.get("bigquery").split_statements(body) == [body]
+
+
+def test_multistatement_materialization_capability() -> None:
+    assert EXECUTORS.get("duckdb").supports_multistatement_materialization is True
+    assert EXECUTORS.get("sqlite").supports_multistatement_materialization is True
+    assert EXECUTORS.get("postgres").supports_multistatement_materialization is True
+    assert EXECUTORS.get("bigquery").supports_multistatement_materialization is False
 
 
 def test_duckdb_executor_creates_view(ctx) -> None:
@@ -50,6 +117,46 @@ def test_sqlite_executor_bad_sql_raises(ctx) -> None:
     cell = _cell("sq", "SELECT * FROM missing", {"input": {"sqlite": ":memory:"}})
     with pytest.raises(ExecutorError, match="sqlite"):
         EXECUTORS.get("sqlite").execute(cell, ctx)
+
+
+def test_duckdb_setup_then_terminal_lands_terminal(ctx) -> None:
+    cell = _cell(
+        "enriched",
+        "CREATE TEMP TABLE staging AS SELECT 1 AS n;\nSELECT n * 2 AS m FROM staging",
+    )
+    view = EXECUTORS.get("duckdb").execute(cell, ctx)
+    assert ctx.conn.sql(f'SELECT * FROM "{view}"').fetchall() == [(2,)]
+
+
+def test_sqlite_setup_then_terminal_lands_terminal(ctx) -> None:
+    cell = _cell(
+        "sq",
+        "CREATE TEMP TABLE staging AS SELECT 5 AS n;\nSELECT n + 1 AS m FROM staging",
+        {"input": {"sqlite": ":memory:"}},
+    )
+    view = EXECUTORS.get("sqlite").execute(cell, ctx)
+    assert ctx.conn.sql(f'SELECT * FROM "{view}"').fetchall() == [(6,)]
+
+
+def test_sqlite_terminal_without_result_set_raises(ctx) -> None:
+    cell = _cell(
+        "sq",
+        "CREATE TABLE t (n INT);\nINSERT INTO t VALUES (1)",  # terminal INSERT: no result set
+        {"input": {"sqlite": ":memory:"}},
+    )
+    with pytest.raises(ExecutorError, match="no result set"):
+        EXECUTORS.get("sqlite").execute(cell, ctx)
+
+
+def test_duckdb_effect_only_runs_all_statements_lands_nothing(ctx) -> None:
+    cell = _cell(
+        "load",
+        "CREATE TABLE t (n INT);\nINSERT INTO t VALUES (1), (2)",
+        {"output": {"type": "none"}},
+    )
+    view = EXECUTORS.get("duckdb").execute(cell, ctx)
+    assert view == ""  # effect-only: nothing to land
+    assert ctx.conn.sql("SELECT count(*) FROM t").fetchone() == (2,)
 
 
 def test_bigquery_same_context_cells_share_a_session(tmp_path, monkeypatch) -> None:
@@ -199,6 +306,24 @@ def test_bigquery_cell_runs_against_the_emulator(tmp_path, bq_emulator) -> None:
     assert sorted(landed["n"].to_list()) == [1, 2]
 
 
+@pytest.mark.bigquery
+def test_bigquery_multistatement_script_lands_terminal(tmp_path, bq_emulator) -> None:
+    from quicksql.compiler import compile_text
+
+    # bigquery runs the whole script server-side; the terminal SELECT's rows land
+    project = compile_text(
+        f"/*@ input: {{ bigquery: {{ project: quicksql-test, endpoint: {bq_emulator} }} }} */\n"
+        "-- @cell scripted\n"
+        "CREATE TEMP TABLE staging AS SELECT 3 AS n UNION ALL SELECT 4 AS n;\n"
+        "SELECT n * 10 AS m FROM staging;\n",
+        root=tmp_path,
+    )
+    results = {r.cell: r for r in project.run()}
+    assert results["scripted"].ok, results["scripted"].error
+    landed = pl.read_parquet(tmp_path / "data" / "scripted.parquet")
+    assert sorted(landed["m"].to_list()) == [30, 40]
+
+
 class FakePgCursor:
     """Stands in for a psycopg cursor: .description (objects with .name) + rows."""
 
@@ -250,6 +375,20 @@ def test_postgres_executor_registers_result(ctx, fake_pg) -> None:
     # trailing semicolon stripped; no session -> the ephemeral connection is closed
     assert fake_pg[0].sqls == ["SELECT n FROM nums"]
     assert fake_pg[0].closed
+
+
+def test_postgres_setup_then_terminal_runs_in_order(ctx, fake_pg) -> None:
+    cell = _cell(
+        "pg",
+        "CREATE TEMP TABLE staging AS SELECT n FROM src;\nSELECT n FROM staging",
+        {"input": {"postgres": {"dsn": "postgresql://x"}}},
+    )
+    EXECUTORS.get("postgres").execute(cell, ctx)
+    # setup statement runs for effect, then the terminal statement is the result
+    assert fake_pg[0].sqls == [
+        "CREATE TEMP TABLE staging AS SELECT n FROM src",
+        "SELECT n FROM staging",
+    ]
 
 
 def test_postgres_executor_string_shorthand_and_env_dsn(monkeypatch) -> None:

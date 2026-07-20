@@ -88,6 +88,52 @@ def test_same_context_cells_share_session_temps(seeded, tmp_path) -> None:
         con.close()
 
 
+def test_multistatement_setup_then_terminal_lands_terminal(seeded, tmp_path) -> None:
+    # a real psycopg connection: the setup statement runs for effect (temp table),
+    # then the terminal SELECT is what lands.
+    project = compile_text(
+        _cell_config(seeded)
+        + "-- @cell enriched\n"
+        + "CREATE TEMP TABLE staging AS SELECT n FROM nums WHERE n <= 3;\n"
+        + "SELECT n * 2 AS doubled FROM staging ORDER BY n;\n",
+        root=tmp_path,
+    )
+    results = {r.cell: r for r in project.run()}
+    assert results["enriched"].ok, results["enriched"].error
+    con = duckdb.connect()
+    try:
+        assert con.sql(
+            f"SELECT doubled FROM read_parquet('{tmp_path / 'data' / 'enriched.parquet'}') ORDER BY doubled"
+        ).fetchall() == [(2,), (4,), (6,)]
+    finally:
+        con.close()
+
+
+def test_effect_only_cell_runs_and_lands_nothing(seeded, tmp_path) -> None:
+    # an effect-only cell writes a real table via side effect and lands no parquet
+    project = compile_text(
+        _cell_config(seeded)
+        + "-- @cell make_scratch\n-- @output: { type: none }\n"
+        + "CREATE TABLE IF NOT EXISTS ms_scratch (n INT);\n"
+        + "INSERT INTO ms_scratch VALUES (7), (8);\n",
+        root=tmp_path,
+    )
+    try:
+        result = project.run()[0]
+        assert result.ok, result.error
+        assert result.rows == 0 and result.target == "none"
+        assert not (tmp_path / "data" / "make_scratch.parquet").exists()
+        import psycopg
+
+        with psycopg.connect(seeded, autocommit=True) as con:
+            assert con.execute("SELECT count(*) FROM ms_scratch").fetchone()[0] == 2
+    finally:
+        import psycopg
+
+        with psycopg.connect(seeded, autocommit=True) as con:
+            con.execute("DROP TABLE IF EXISTS ms_scratch")
+
+
 def test_failed_cell_does_not_poison_the_session(seeded, tmp_path) -> None:
     """watch/TUI keep one session across reruns: without autocommit a failed
     statement would leave it aborted and every later cell would fail too."""

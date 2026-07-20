@@ -25,6 +25,24 @@ def test_run_lands_parquet_and_previews(tmp_path) -> None:
     assert results[1].elapsed > 0
 
 
+def test_effect_only_cell_runs_for_side_effect_and_lands_nothing(tmp_path) -> None:
+    project = compile_text(
+        "-- @cell load\n-- @output: { type: none }\n"
+        "CREATE TABLE staged (n INT);\nINSERT INTO staged VALUES (1), (2), (3);\n"
+        "-- @cell counted\n-- @depends_on: [load]\n"
+        "SELECT count(*) AS c FROM staged;\n",
+        root=tmp_path,
+    )
+    results = {r.cell: r for r in project.run()}
+    assert results["load"].ok, results["load"].error
+    assert results["load"].rows == 0 and results["load"].target == "none"
+    # the effect-only cell actually ran its statements: a downstream cell sees the rows
+    assert results["counted"].ok, results["counted"].error
+    assert results["counted"].preview["c"].to_list() == [3]
+    # nothing landed for the effect-only cell
+    assert not (tmp_path / "data" / "load.parquet").exists()
+
+
 def test_cross_engine_sqlite_duckdb_join(tmp_path) -> None:
     con = sqlite3.connect(tmp_path / "legacy.sqlite")
     con.execute("CREATE TABLE users (user_id INTEGER, name TEXT)")

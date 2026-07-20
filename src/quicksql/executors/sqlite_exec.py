@@ -10,7 +10,7 @@ import polars as pl
 from ..errors import ExecutorError
 from ..models import RenderedCell, RunContext
 from ..registry import executor
-from .base import Executor, register_frame, result_view, strip_trailing_semicolon
+from .base import Executor, register_frame, result_view
 
 
 @executor("sqlite")
@@ -38,14 +38,21 @@ class SQLiteExecutor(Executor):
 
     def execute(self, cell: RenderedCell, ctx: RunContext) -> str:
         con, ephemeral = self._connect(cell, ctx)
-        sql = strip_trailing_semicolon(cell.sql)
+        *setup, final = self.split_statements(cell.sql)
         try:
+            if cell.sink_type == "none":
+                # effect-only: run every statement for its side effects, land nothing
+                for stmt in [*setup, final]:
+                    con.execute(stmt)
+                return ""
+            for stmt in setup:  # build-up statements run for effect on the connection
+                con.execute(stmt)
             if cell.reffed_in_context:
                 con.execute(f'DROP TABLE IF EXISTS temp."{cell.name}"')
-                con.execute(f'CREATE TEMP TABLE "{cell.name}" AS {sql}')
+                con.execute(f'CREATE TEMP TABLE "{cell.name}" AS {final}')
                 cur = con.execute(f'SELECT * FROM temp."{cell.name}"')
             else:
-                cur = con.execute(sql)
+                cur = con.execute(final)
             if cur.description is None:
                 raise ExecutorError(f"cell {cell.name!r}: sqlite query returned no result set")
             cols = [d[0] for d in cur.description]

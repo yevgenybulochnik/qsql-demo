@@ -16,6 +16,13 @@ from .base import Executor, register_frame, result_view, strip_trailing_semicolo
 @executor("bigquery")
 class BigQueryExecutor(Executor):
     supports_context_refs = True
+    # bigquery runs multi-statement scripts server-side in one job; splitting
+    # client-side would run the pieces as separate jobs and lose session state,
+    # and a script can't be wrapped in CREATE TEMP TABLE AS (...).
+    supports_multistatement_materialization = False
+
+    def split_statements(self, sql: str) -> list[str]:
+        return [strip_trailing_semicolon(sql)]
 
     def context_key(self, config: Any) -> str:
         spec = (config.input or {}).get("bigquery") or {}
@@ -99,7 +106,14 @@ class BigQueryExecutor(Executor):
 
     def execute(self, cell: RenderedCell, ctx: RunContext) -> str:
         spec = (cell.config.input or {}).get("bigquery") or {}
-        sql = strip_trailing_semicolon(cell.sql)
+        sql = strip_trailing_semicolon(cell.sql)  # bigquery runs the whole script in one job
+        if cell.sink_type == "none":
+            # effect-only: run the (possibly multi-statement) script, land nothing
+            if cell.context_refs:
+                self._query(self._session_state(cell, ctx, spec), sql)
+            else:
+                self.make_client(spec).query(sql, **self._query_opts(spec)).result()
+            return ""
         if cell.reffed_in_context:
             # materialize once; the temp serves consumers, the read lands parquet
             state = self._session_state(cell, ctx, spec)
