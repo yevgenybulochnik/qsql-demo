@@ -567,6 +567,93 @@ def test_completion_in_ref_call_offers_cell_names(tmp_path) -> None:
     assert "users" in names
 
 
+def _land_cells(tmp_path, text, cells):
+    from quicksql.runner import run_project
+
+    nb = tmp_path / "n.qsql"
+    nb.write_text(text)
+    run_project(compile_file(nb), select=cells)
+
+
+def test_completion_alias_collision_resolves_to_the_cursor_statement(tmp_path) -> None:
+    """Same alias in two statements: completing it uses the cursor's statement,
+    not whichever assignment won the merged whole-cell parse."""
+    from quicksql.lsp.analysis import Analyzer
+
+    text = (
+        "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
+        "-- @cell a\nSELECT 1 AS aid, 2 AS aname;\n"
+        "-- @cell b\nSELECT 3 AS bid, 4 AS bname;\n"
+        "-- @cell down\n"
+        "SELECT t. FROM {{ ref('a') }} t;\n"     # line 7: alias t -> a
+        "SELECT bid FROM {{ ref('b') }} t\n"      # line 8: alias t -> b (same name)
+    )
+    _land_cells(tmp_path, text, ["a", "b"])
+    fields = {
+        c.label
+        for c in Analyzer().completions(text, tmp_path, 7, len("SELECT t."))
+        if c.kind == "field"
+    }
+    assert {"aid", "aname"} <= fields  # statement 1's ref('a')
+    assert "bid" not in fields and "bname" not in fields  # not statement 2's colliding t
+
+
+def test_completion_does_not_pollute_with_other_statements_columns(tmp_path) -> None:
+    """Bare column completion in one statement must not offer columns from a
+    sibling statement's FROM clause (the merged parse used to union them)."""
+    from quicksql.lsp.analysis import Analyzer
+
+    text = (
+        "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
+        "-- @cell a\nSELECT 1 AS aid, 2 AS aname;\n"
+        "-- @cell b\nSELECT 3 AS bid, 4 AS bname;\n"
+        "-- @cell down\n"
+        "SELECT aid FROM {{ ref('a') }} x;\n"    # line 7
+        "SELECT  FROM {{ ref('b') }} y\n"         # line 8: bare cursor after 'SELECT '
+    )
+    _land_cells(tmp_path, text, ["a", "b"])
+    fields = {
+        c.label
+        for c in Analyzer().completions(text, tmp_path, 8, len("SELECT "))
+        if c.kind == "field"
+    }
+    assert {"bid", "bname"} <= fields  # statement 2's ref('b')
+    assert "aid" not in fields and "aname" not in fields  # not statement 1's
+
+
+def test_completion_just_after_trailing_semicolon_reuses_previous_scope(tmp_path) -> None:
+    from quicksql.lsp.analysis import Analyzer
+
+    text = (
+        "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
+        "-- @cell a\nSELECT 1 AS aid;\n"
+        "-- @cell down\nSELECT aid FROM {{ ref('a') }} a;\n"  # line 5
+    )
+    _land_cells(tmp_path, text, ["a"])
+    stmt = "SELECT aid FROM {{ ref('a') }} a;"
+    labels = {c.label for c in Analyzer().completions(text, tmp_path, 5, len(stmt))}
+    assert "aid" in labels  # cursor just past ';' reuses the previous statement's scope
+
+
+def test_completion_survives_multi_statement_edges(tmp_path) -> None:
+    """A trailing blank line and a {% %} control block across statements must
+    not crash completion (bounds guard + degraded-parse tolerance)."""
+    from quicksql.lsp.analysis import Analyzer
+
+    a = Analyzer()
+    blank_tail = (
+        "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
+        "-- @cell x\nSELECT 1 AS n;\nSELECT 2 AS m;\n\n"  # trailing blank line at EOF
+    )
+    assert isinstance(a.completions(blank_tail, tmp_path, 5, 0), list)
+
+    control = (
+        "-- @engine: duckdb\n-- @output: { type: parquet, dir: data/ }\n"
+        "-- @cell x\nSELECT 1 AS n;\n{% if true %}SELECT m {% endif %}\n"
+    )
+    assert isinstance(a.completions(control, tmp_path, 4, len("{% if true %}SELECT m")), list)
+
+
 @pytest.mark.postgres
 def test_completion_alias_scopes_to_a_live_postgres_table(tmp_path) -> None:
     from quicksql.lsp.analysis import Analyzer

@@ -18,6 +18,7 @@ from sqlglot.errors import ErrorLevel, ParseError
 
 from ..compiler import compile_text
 from ..errors import ConfigErrorGroup, CycleError, ParseError as QsqlParseError, QsqlError
+from ..executors.base import statement_spans
 from .googlesql import find_execute_query, parse_errors
 from . import vocab
 from .mask import Opaque, Ref, Source, mask_jinja
@@ -123,7 +124,7 @@ class Analyzer:
         source = cell.source
         if alias_m is not None:
             source = _patch_dangling(cell, line, character, alias_m.start(1))
-        scope = _resolve_scope(project, cell, source)
+        scope = _resolve_scope(project, cell, source, line, character)
         relations = [scope[alias]] if alias and alias in scope else list(scope.values())
 
         seen: set[str] = set()
@@ -234,12 +235,19 @@ def _cell_at(project: Any, line1: int) -> Any | None:
     return None
 
 
+def _row_index(cell: Any, line: int, n: int) -> int | None:
+    """File line (0-indexed) -> cell-source row, or None if out of range.
+    Shared so `_patch_dangling` and statement-offset math guard identically."""
+    idx = line - (cell.line - 1)
+    return idx if 0 <= idx < n else None
+
+
 def _patch_dangling(cell: Any, line: int, character: int, token_start: int) -> str:
     """Replace the in-progress ``alias.partial`` token at the cursor with a
     same-length ``1``-literal so the statement parses (length-preserving)."""
     src_lines = cell.source.splitlines()
-    idx = line - (cell.line - 1)  # file line (0-indexed) -> cell-source line
-    if not (0 <= idx < len(src_lines)):
+    idx = _row_index(cell, line, len(src_lines))
+    if idx is None:
         return cell.source
     row = src_lines[idx]
     end = character
@@ -249,13 +257,47 @@ def _patch_dangling(cell: Any, line: int, character: int, token_start: int) -> s
     return "\n".join(src_lines)
 
 
-def _resolve_scope(project: Any, cell: Any, source: str | None = None) -> dict[str, Any]:
+def _statement_slice(
+    cell: Any, src: str, masked: str, dialect: str | None, line: int | None, character: int | None
+) -> str:
+    """Narrow ``masked`` to the statement the cursor is in, so scope resolves per
+    statement rather than merging every statement's tables into one flat scope.
+
+    Statement offsets are found on the raw ``src`` (not ``masked``) so a
+    ``{{ var }}`` value substitution can't inject a split point; ``mask_jinja`` is
+    length-preserving, so those offsets index ``masked`` directly. Falls back to
+    the whole ``masked`` when the cursor can't be placed (out-of-range row, no
+    spans, or a leading comment before the first statement)."""
+    if line is None or character is None:
+        return masked
+    src_lines = src.split("\n")
+    idx = _row_index(cell, line, len(src_lines))
+    if idx is None:
+        return masked
+    offset = sum(len(seg) + 1 for seg in src_lines[:idx]) + character
+    here = [(a, b) for a, b in statement_spans(src, dialect or "") if a <= offset]
+    if not here:
+        return masked
+    start, end = here[-1]  # the statement with the greatest start <= cursor offset
+    return masked[start:end]
+
+
+def _resolve_scope(
+    project: Any,
+    cell: Any,
+    source: str | None = None,
+    line: int | None = None,
+    character: int | None = None,
+) -> dict[str, Any]:
     """alias/name (lowercased) -> relation: a mask Ref/Source tag for a
     ``{{ ref/source }}`` placeholder, a Projection for a CTE alias, else the
-    (qualified) table-name string."""
+    (qualified) table-name string. Scoped to the cursor's statement when
+    ``line``/``character`` are given."""
     dialect = _DIALECT.get(cell.engine)
-    masked, spans = mask_jinja(source if source is not None else cell.source, _cell_vars(cell))
+    src = source if source is not None else cell.source
+    masked, spans = mask_jinja(src, _cell_vars(cell))
     by_placeholder = {s.name: s.tag for s in spans if s.name}
+    masked = _statement_slice(cell, src, masked, dialect, line, character)
     try:
         tree = sqlglot.parse_one(masked, dialect=dialect, error_level=ErrorLevel.IGNORE)
     except Exception:
