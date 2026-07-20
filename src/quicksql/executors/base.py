@@ -17,34 +17,45 @@ def strip_trailing_semicolon(sql: str) -> str:
     return sql.strip().rstrip(";").strip()
 
 
-def split_statements(sql: str, dialect: str) -> list[str]:
-    """Split a cell body into individual statements on top-level semicolons.
+def statement_spans(sql: str, dialect: str) -> list[tuple[int, int]]:
+    """(start, end) char offsets of each top-level statement in ``sql``.
 
-    Each statement is returned as its *original* text (sqlglot's re-render would
-    rewrite dialect-specific syntax, e.g. LIST_TRANSFORM/spacing), so we only use
-    the tokenizer to locate semicolon offsets and slice the source. Semicolons
-    inside string literals and comments are not split points. On a tokenizer
-    error (e.g. an unterminated literal), the whole body is treated as one
-    statement so the engine reports the real syntax error, not us.
+    Only the tokenizer is used to locate semicolons, so a ``;`` inside a string
+    literal or comment is not a split point. Segments holding no real token — a
+    run of comments/whitespace, e.g. a collapsed Jinja ``{% if %}`` or a
+    trailing-comment tail after the final ``;`` — are dropped. Spans are the raw
+    source segments between semicolons (leading/trailing whitespace kept), so
+    they tile the source and a cursor offset always lands in one. Returns ``[]``
+    on a tokenizer error (e.g. an unterminated literal); the caller decides the
+    fallback.
     """
     try:
         tokens = sqlglot.Dialect.get_or_raise(dialect).tokenize(sql)
     except Exception:
-        return [strip_trailing_semicolon(sql)]
-    # Slice the source between top-level semicolons, but only emit a segment that
-    # holds a real token — a run of comments/whitespace (e.g. a collapsed Jinja
-    # {% if %} or trailing help comments after the final ';') is not a statement.
-    stmts: list[str] = []
+        return []
+    spans: list[tuple[int, int]] = []
     seg_start, has_token = 0, False
     for tok in tokens:
         if tok.token_type == TokenType.SEMICOLON:
             if has_token:
-                stmts.append(sql[seg_start : tok.start].strip())
+                spans.append((seg_start, tok.start))
             seg_start, has_token = tok.end + 1, False
         else:
             has_token = True
     if has_token:
-        stmts.append(sql[seg_start:].strip())
+        spans.append((seg_start, len(sql)))
+    return spans
+
+
+def split_statements(sql: str, dialect: str) -> list[str]:
+    """Split a cell body into individual statements on top-level semicolons.
+
+    Each statement is its *original* text (sqlglot's re-render would rewrite
+    dialect-specific syntax, e.g. LIST_TRANSFORM/spacing), so we slice the source
+    at the tokenizer's semicolon offsets. On a tokenizer error the whole body is
+    treated as one statement so the engine reports the real syntax error, not us.
+    """
+    stmts = [sql[a:b].strip() for a, b in statement_spans(sql, dialect)]
     return [s for s in stmts if s] or [strip_trailing_semicolon(sql)]
 
 

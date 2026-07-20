@@ -77,6 +77,28 @@ def test_split_statements_drops_comment_only_tail() -> None:
     assert split_statements(body, "duckdb") == ["SELECT u.name\nFROM users u"]
 
 
+def test_statement_spans_returns_raw_offsets_that_tile_the_source() -> None:
+    from quicksql.executors.base import statement_spans
+
+    sql = "SELECT 1; SELECT 2"
+    spans = statement_spans(sql, "duckdb")
+    assert spans == [(0, 8), (9, 18)]  # raw segments (leading ws kept), split on the ';'
+    assert [sql[a:b].strip() for a, b in spans] == ["SELECT 1", "SELECT 2"]
+
+
+def test_statement_spans_excludes_comment_only_tail() -> None:
+    from quicksql.executors.base import statement_spans
+
+    sql = "SELECT 1;\n-- trailing comment"
+    assert [sql[a:b].strip() for a, b in statement_spans(sql, "duckdb")] == ["SELECT 1"]
+
+
+def test_statement_spans_empty_on_tokenizer_error() -> None:
+    from quicksql.executors.base import statement_spans
+
+    assert statement_spans("SELECT 'oops", "duckdb") == []
+
+
 def test_executor_split_policy_bigquery_never_splits() -> None:
     body = "CREATE TEMP TABLE t AS SELECT 1; SELECT * FROM t"
     assert EXECUTORS.get("duckdb").split_statements(body) == [
