@@ -9,9 +9,19 @@ first `@cell`) inherited by every cell.
 
 - **Cell shape = input → engine → output.** Cells form a DAG from `{{ ref('cell') }}` +
   `@depends_on`, topo-sorted with cycle detection (`graph.py`).
+- **A cell body may be multiple statements.** `executors/base.split_statements` (sqlglot
+  tokenizer, engine dialect, comment/string-aware, original text preserved) splits on
+  top-level `;`; setup statements run for effect and the **terminal** statement is wrapped/
+  landed as today. `@output: {type: none}` (`sinks/none_sink.py`, `lands_output=False`) is
+  effect-only — runs every statement, lands nothing, can't be `ref()`'d (compiler rejects
+  the ref). BigQuery overrides `split_statements` to *never* split (native scripting runs the
+  whole body in one job); `supports_multistatement_materialization=False` makes the compiler
+  reject a multi-statement BigQuery cell that is reffed in-context. Postgres/SQLite keep
+  autocommit, so a mid-cell failure leaves earlier statements' effects (documented, by
+  design). LSP completion still parses only the first statement (diagnostics parse all).
 - **Sinks are the cross-cell interchange.** Each cell lands via its sink (default
   `data/<cell>.parquet`); `Sink.ref_expr()` tells downstream cells how to read it back
-  (read_parquet, ATTACHed duckdb/postgres table, ...).
+  (read_parquet, ATTACHed duckdb/postgres table, ...). The `none` sink lands nothing.
 - **Engine contexts.** Cells partition by (engine, connection target) via
   `Executor.context_key`. Same-context `ref()` resolves to a bare temp-table name in
   the engine's own dialect (session-scoped: duckdb conduit / shared sqlite connection /

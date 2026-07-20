@@ -98,6 +98,35 @@ JOIN events e USING (user_id)
 ;
 ```
 
+### Multiple statements per cell
+
+A cell body may be several `;`-separated statements. The **last** statement is the one that
+lands (and that downstream cells `ref()`); the earlier statements run for their side effects
+first — build up a temp, transform it, then select from it:
+
+```sql
+-- @cell enriched
+CREATE OR REPLACE TEMP TABLE staging AS SELECT * FROM {{ ref('raw') }} WHERE ok;
+UPDATE staging SET amount = amount * 100;   -- run for effect
+SELECT * FROM staging;                      -- <- this is what lands
+```
+
+Set `-- @output: { type: none }` to make a cell **effect-only** — every statement runs and
+nothing lands. Effect-only cells can't be `ref()`'d (there's no result to read back); depend
+on one for ordering with `@depends_on`.
+
+```sql
+-- @cell load_warehouse
+-- @output: { type: none }
+INSERT INTO warehouse.fact SELECT * FROM {{ ref('enriched') }};
+```
+
+Notes: on Postgres/SQLite the statements share the cell's (autocommit) session, so a failure
+partway leaves earlier statements' effects in place. On DuckDB, `CREATE TEMP TABLE` in a setup
+statement lives on the shared conduit — prefer `CREATE OR REPLACE TEMP TABLE` to avoid clashes
+across cells. BigQuery runs the whole body as one native script (its terminal statement's rows
+land); a BigQuery cell that is `ref()`'d in-context must be a single statement.
+
 ## How it works
 
 - **Cells + DAG.** Edges come from `{{ ref('cell') }}` and explicit `@depends_on`. Cells are
@@ -128,7 +157,7 @@ where it may appear (global header, per-cell, or both).
 |---|---|---|
 | `engine` | both | Pick the executor explicitly (`duckdb`, `sqlite`, `postgres`, `bigquery`). |
 | `input` | both | Connection config; the engine is inferred from the sole top-level key (e.g. `{ sqlite: legacy.db }`). |
-| `output` | both | Sink config. Default `{ type: parquet, dir: data/ }`. |
+| `output` | both | Sink config. Default `{ type: parquet, dir: data/ }`. `{ type: none }` makes the cell effect-only (runs, lands nothing, not `ref()`-able). |
 | `sources` | both | Named file sources that `source('name')` resolves (path + reader options). |
 | `extensions` | both | DuckDB extensions to load on the conduit before the cell runs. |
 | `vars` | both | Values that `var('key')` reads. |
