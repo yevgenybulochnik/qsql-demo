@@ -262,9 +262,17 @@ $ uv sync --extra lsp           # the language server (pygls + sqlglot)
 
 ## Demos
 
-[`demo/`](demo/README.md) holds self-contained demos, each bringing its own docker-compose
-backends and seed data. Start with [`demo/kitchen-sink/`](demo/kitchen-sink/README.md) — one
-notebook spanning all three remote engines:
+[`demo/`](demo/README.md) holds self-contained demos with their own seed data. The
+zero-setup one is [`demo/sources/`](demo/sources/README.md) — a bookshop's analytics built
+entirely from local files (`source()` over CSV, NDJSON, pipe-delimited text, and Parquet),
+no backend to stand up:
+
+```console
+$ uv run quicksql run demo/sources/sources.qsql
+```
+
+For the full tour, [`demo/kitchen-sink/`](demo/kitchen-sink/README.md) brings docker-compose
+backends and spans all three remote engines:
 
 - **Postgres** holds a synthetic claims warehouse (including a 250-column flattened 837
   extract to stress the TUI catalog).

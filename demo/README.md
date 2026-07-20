@@ -6,6 +6,7 @@ by the test suite (the repo-root `docker-compose.yml` is the pytest stack).
 
 | directory | what it shows |
 |---|---|
+| [`sources/`](sources/) | reading raw local files with `source()` — CSV, NDJSON, pipe-delimited text, and Parquet joined on DuckDB; no backend to stand up |
 | [`kitchen-sink/`](kitchen-sink/) | the works — Postgres claims warehouse (incl. a 250-column table), BigQuery-emulator drug compendia, cross-engine DuckDB joins, vars, DuckDB sink, autorun |
 
 Demo stacks run on offset host ports (kitchen-sink: Postgres 5433, bigquery

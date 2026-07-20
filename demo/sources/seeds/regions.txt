@@ -1,0 +1,4 @@
+channel|segment|commission_pct
+web|Direct-to-Reader|0
+retail|Storefront|0
+wholesale|Trade|8
