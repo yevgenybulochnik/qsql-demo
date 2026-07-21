@@ -2,9 +2,10 @@
 
 Top: the cell list (engine -> sink, autorun, status, rows). Below: tabs for
 SQL (t toggles raw/rendered), Data (a stack of Polars Sheets with vim keys),
-Config, and Log. Nothing runs on startup: the first R (run all) arms autorun,
-after which a background watcher recompiles on save and reruns autorun cells.
-The file is edited in your own editor; the TUI never writes it.
+Config, and Log. Nothing runs on startup: the first R (run all) arms autorun
+(or p arms it without running), after which a background watcher recompiles on
+save and reruns autorun cells. The file is edited in your own editor; the TUI
+never writes it.
 
 Keys: j/k cell rows . h/l cycle detail tabs . gg/G top/bottom . Enter dive into
 the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
@@ -14,7 +15,8 @@ f filter rows by regex (live; Enter commits, Esc cancels) . y yank the cell
 S catalog browser (Enter drills context/dataset/table down to field paths,
 q pops; levels are cached — ctrl+r refetches the current one) .
 | split the data pane into two side-by-side sheets, w switch the focused one .
-t raw/rendered . a/A cell/global autorun . r/R run cell/all .
+t raw/rendered . a/A cell/global autorun . r/R run cell/all . p arm watch
+(autorun on/off without a full run) .
 V real VisiData . o open/switch notebook (auto-opens as a picker when the
 file doesn't exist; creating from a template prompts for the new file's
 name) . ? help overlay (all keys) . q pop/quit
@@ -164,8 +166,9 @@ class HelpScreen(ModalScreen):
             ("h/l", "cycle detail tabs (SQL / Data / Config / Log)"),
             ("enter", "dive into the Data sheet"),
             ("/", "search cell names"),
-            ("r/R", "run cell / run all (arms watch reruns)"),
-            ("a/A", "toggle autorun for the cell / globally"),
+            ("r/R", "run cell / run all (R also arms watch reruns)"),
+            ("p", "arm / pause watch reruns without running (autorun)"),
+            ("a/A", "which cells autorun: this cell / global filter"),
             ("t", "SQL raw ↔ rendered"),
             ("S", "catalog browser"),
             ("V", "open the cell's output in VisiData"),
@@ -253,6 +256,7 @@ class QsqlApp(App):
         Binding("t", "toggle_sql", "raw/rendered"),
         Binding("a", "toggle_autorun", "autorun"),
         Binding("A", "toggle_autorun_global", "autorun*"),
+        Binding("p", "toggle_armed", "watch"),
         Binding("F", "frequency", "freq"),
         Binding("I", "describe", "describe"),
         Binding("S", "catalog", "catalog"),
@@ -395,7 +399,6 @@ class QsqlApp(App):
     def _load_notebook(self, path: Path | str) -> None:
         """Open a notebook (fresh state), arming and watching per-notebook."""
         self.path = Path(path)
-        self.title = f"quicksql · {self.path.name}"
         self.results = {}
         self.running = set()
         self.panes = [[]]
@@ -405,6 +408,7 @@ class QsqlApp(App):
         self._sync_split_layout()
         self.mode = "cells"
         self.armed = False
+        self._refresh_armed_indicator()
         self.project = None
         try:
             self.project = compile_file(self.path, self.overrides)
@@ -417,7 +421,7 @@ class QsqlApp(App):
         if self.auto_run:
             self.action_run_all()
         else:
-            self.log_line("autorun paused — press R to run all cells and arm watch reruns")
+            self.log_line("autorun paused — R runs all & arms; p arms without running")
         if self.watch:
             self._watch_worker()  # exclusive group: replaces any previous watcher
 
@@ -724,7 +728,23 @@ class QsqlApp(App):
 
     def action_run_all(self) -> None:
         self.armed = True
+        self._refresh_armed_indicator()
         self._run_worker(None, closure=True)
+
+    def action_toggle_armed(self) -> None:
+        """Arm/disarm watch reruns *without* running anything — the light-weight
+        counterpart to run-all (R), which arms only as a side effect of a full run."""
+        self.armed = not self.armed
+        self._refresh_armed_indicator()
+        self.log_line(
+            "autorun on — saves rerun changed cells (no full run)"
+            if self.armed
+            else "autorun off — watch reruns paused"
+        )
+
+    def _refresh_armed_indicator(self) -> None:
+        state = "▶ live" if self.armed else "⏸ paused"
+        self.title = f"quicksql · {self.path.name} · {state}"
 
     def action_frequency(self) -> None:
         if self.mode == "data" and self.sheet_stack:
@@ -1118,7 +1138,7 @@ class QsqlApp(App):
         if not self.armed:
             if planned:
                 self.log_line(
-                    f"changed: {', '.join(planned)} (autorun paused — press R to run all)"
+                    f"changed: {', '.join(planned)} (paused — R runs all, or p to arm)"
                 )
             return []
         to_run = [n for n in planned if self.cell_autorun(n)]
