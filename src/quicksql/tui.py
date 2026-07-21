@@ -1180,6 +1180,8 @@ class QsqlApp(App):
             self._catalog_dive_pending = False
             self.mode = "catalog"
         self._refresh_catalog()
+        if self.mode != "catalog":  # browse push: drop the loading… subtitle
+            self._restore_subtitle()
 
     def _replace_top_sheet(self, sheet: Sheet) -> None:
         if self.catalog_stack:
