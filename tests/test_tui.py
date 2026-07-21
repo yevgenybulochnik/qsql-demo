@@ -264,8 +264,16 @@ async def test_h_l_cycle_tabs_and_data_follows_selection(notebook) -> None:
         assert app.sheet_stack[-1].title == "events"  # Data pane follows
         await pilot.press("l", "l")
         assert tabs.active == "tab_log"
+        await pilot.press("l")  # onto the Catalog tab (still browsing)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert tabs.active == "tab_catalog"
         await pilot.press("l")  # wraps around
         assert tabs.active == "tab_sql"
+        await pilot.press("h")
+        assert tabs.active == "tab_catalog"
+        await app.workers.wait_for_complete()
+        await pilot.pause()
         await pilot.press("h")
         assert tabs.active == "tab_log"
 

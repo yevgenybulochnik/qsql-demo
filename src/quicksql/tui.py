@@ -2,7 +2,8 @@
 
 Top: the cell list (engine -> sink, autorun, status, rows). Below: tabs for
 SQL (t toggles raw/rendered), Data (a stack of Polars Sheets with vim keys),
-Config, and Log. Nothing runs on startup: the first R (run all) arms autorun
+Config, Log, and Catalog (the project-wide schema browser, on its own
+drilling stack). Nothing runs on startup: the first R (run all) arms autorun
 (or p arms it without running), after which a background watcher recompiles on
 save and reruns autorun cells. The file is edited in your own editor; the TUI
 never writes it.
@@ -12,8 +13,9 @@ the Data sheet (then j/k/h/l move its cursor; q climbs back out) . [ ] sort .
 - hide col . s/gs select . F frequency . I describe . / search, n/N next/prev .
 f filter rows by regex (live; Enter commits, Esc cancels) . y yank the cell
 (or selected rows' column, ",\n"-joined) to the clipboard .
-S catalog browser (Enter drills context/dataset/table down to field paths,
-q pops; levels are cached — ctrl+r refetches the current one) .
+Catalog tab (S jumps in; browse via h/l, Enter dives, then drills
+context/dataset/table down to field paths, q pops; levels are cached —
+ctrl+r refetches the current one) .
 | split the data pane into two side-by-side sheets, w switch the focused one .
 t raw/rendered . a/A cell/global autorun . r/R run cell/all . p arm watch
 (autorun on/off without a full run) .
@@ -170,7 +172,7 @@ class HelpScreen(ModalScreen):
             ("p", "arm / pause watch reruns without running (autorun)"),
             ("a/A", "which cells autorun: this cell / global filter"),
             ("t", "SQL raw ↔ rendered"),
-            ("S", "catalog browser"),
+            ("S", "jump into the Catalog tab"),
             ("V", "open the cell's output in VisiData"),
             ("o", "open / switch notebook"),
         ]),
@@ -188,10 +190,11 @@ class HelpScreen(ModalScreen):
             ("y", "yank cell / selected column to clipboard"),
             ("q", "pop the sheet (back a level)"),
         ]),
-        ("Catalog (S)", [
-            ("enter", "drill: context → dataset → table → fields"),
+        ("Catalog tab", [
+            ("S", "jump to the Catalog tab and dive in"),
+            ("enter", "dive, then drill: context → dataset → table → fields"),
             ("ctrl+r", "refetch the current level"),
-            ("q", "pop back a level"),
+            ("q", "pop back a level, then out to the cell list"),
         ]),
         ("Split", [
             ("|", "split the data pane in two (or unsplit)"),
@@ -289,12 +292,14 @@ class QsqlApp(App):
         self.autorun_off: set[str] = set()
         self.autorun_global = True
         self.show_rendered = True
-        self.mode = "cells"  # or "data"
+        self.mode = "cells"  # or "data" / "catalog"
         # one drilling stack per pane; a vertical split appends a second stack.
-        # sheet_stack (property, below) is the active pane's stack, so the rest
-        # of the app is oblivious to the split.
+        # sheet_stack (property, below) is the active surface's stack, so the
+        # rest of the app is oblivious to the split — and to the catalog.
         self.panes: list[list[Sheet]] = [[]]
         self.active_pane = 0
+        self.catalog_stack: list[Sheet] = []  # the Catalog tab's own dive
+        self._catalog_dive_pending = False  # S pressed while the root loads
         self.hashes: dict[str, str] = {}
         self._row_names: list[str] = []
         self._pending_g = False
@@ -302,22 +307,33 @@ class QsqlApp(App):
         self._input_mode = "search"  # what the bottom input edits: search | filter
         self._filter_base: Sheet | None = None  # sheet being live-filtered
         self._catalog_cache = CatalogCache()  # cleared on run/recompile/switch
-        # what each pane's table currently displays (one slot per pane table);
-        # holding the frame reference keeps identity comparison sound
-        self._data_shown: list[tuple[Any, tuple[str, ...], frozenset[int], int] | None] = [None, None]
+        # what each sheet table currently displays (slots 0/1 = panes,
+        # slot 2 = the catalog table); holding the frame reference keeps
+        # identity comparison sound
+        self._data_shown: list[tuple[Any, tuple[str, ...], frozenset[int], int] | None] = [None] * 3
 
     # ---------- panes (vertical split) ----------
 
+    SHEET_MODES = ("data", "catalog")  # modes whose keys live in a sheet
+
     @property
     def sheet_stack(self) -> list[Sheet]:
-        """The focused pane's drilling stack. Reads and in-place mutations
-        (append/pop/insert/[-1]=) operate on the active pane; assigning a new
-        list replaces the active pane's stack (see the setter)."""
+        """The active surface's drilling stack: the catalog's own stack in
+        catalog mode, else the focused pane's. Reads and in-place mutations
+        (append/pop/insert/[-1]=) operate on that stack; assigning a new list
+        replaces it (see the setter). Routing by mode is what lets the sheet
+        verbs (filter/yank/search/freq/drill/pop) work unchanged on either
+        surface."""
+        if self.mode == "catalog":
+            return self.catalog_stack
         return self.panes[self.active_pane]
 
     @sheet_stack.setter
     def sheet_stack(self, value: list[Sheet]) -> None:
-        self.panes[self.active_pane] = value
+        if self.mode == "catalog":
+            self.catalog_stack = value
+        else:
+            self.panes[self.active_pane] = value
 
     @property
     def split(self) -> bool:
@@ -329,6 +345,8 @@ class QsqlApp(App):
         return self.query_one(self.PANE_TABLE_IDS[idx], DataTable)
 
     def _active_table(self) -> DataTable:
+        if self.mode == "catalog":
+            return self.query_one("#catalog", DataTable)
         return self._pane_table(self.active_pane)
 
     def _sync_split_layout(self) -> None:
@@ -340,7 +358,7 @@ class QsqlApp(App):
         """Drop back to a single pane, keeping stack ``keep``."""
         self.panes = [self.panes[keep]]
         self.active_pane = 0
-        self._data_shown = [None, None]
+        self._data_shown[:2] = [None, None]  # pane slots only; catalog keeps its cache
         self._pane_table(1).clear(columns=True)
         self._sync_split_layout()
 
@@ -354,7 +372,7 @@ class QsqlApp(App):
             # panes diverge as each is navigated; focus lands on the new pane
             self.panes.append(list(self.panes[self.active_pane]))
             self.active_pane = 1
-            self._data_shown = [None, None]
+            self._data_shown[:2] = [None, None]  # pane slots only
             self._sync_split_layout()
         self._refresh_data()
 
@@ -382,6 +400,8 @@ class QsqlApp(App):
                     yield Static(id="config_view")
                 with TabPane("Log", id="tab_log"):
                     yield RichLog(id="log", markup=False, wrap=True)
+                with TabPane("Catalog", id="tab_catalog"):
+                    yield DataTable(id="catalog", cursor_type="cell")
         yield Input(placeholder="search...", id="search")
         yield Footer()
 
@@ -390,6 +410,7 @@ class QsqlApp(App):
         table.add_columns("cell", "engine → sink", "auto", "status", "rows", "ms")
         self.query_one("#data", DataTable).can_focus = False
         self.query_one("#data2", DataTable).can_focus = False
+        self.query_one("#catalog", DataTable).can_focus = False
         table.focus()
         if self.path.exists():
             self._load_notebook(self.path)
@@ -403,8 +424,10 @@ class QsqlApp(App):
         self.running = set()
         self.panes = [[]]
         self.active_pane = 0
+        self.catalog_stack = []
+        self._catalog_dive_pending = False
         self._catalog_cache.invalidate()
-        self._data_shown = [None, None]
+        self._data_shown = [None] * 3
         self._sync_split_layout()
         self.mode = "cells"
         self.armed = False
@@ -564,6 +587,27 @@ class QsqlApp(App):
             self._render_pane(idx, table)
 
     _SELECT_MARK = "▸"
+    CATALOG_SLOT = 2  # the catalog table's _data_shown slot
+
+    def _refresh_catalog(self) -> None:
+        table = self.query_one("#catalog", DataTable)
+        if not self.catalog_stack:
+            table.clear(columns=True)
+            self._data_shown[self.CATALOG_SLOT] = None
+            return
+        self._render_sheet_table(
+            self.catalog_stack[-1],
+            table,
+            slot=self.CATALOG_SLOT,
+            active=self.mode == "catalog",
+        )
+
+    def _refresh_surface(self) -> None:
+        """Repaint the active drilling surface (catalog vs data panes)."""
+        if self.mode == "catalog":
+            self._refresh_catalog()
+        else:
+            self._refresh_data()
 
     def _render_pane(self, idx: int, table: DataTable) -> None:
         active = idx == self.active_pane
@@ -660,13 +704,18 @@ class QsqlApp(App):
         return widths
 
     def _mutate_sheet(self, fn) -> None:
-        if self.mode != "data" or not self.sheet_stack:
+        if self.mode not in self.SHEET_MODES or not self.sheet_stack:
             return
         self.sheet_stack[-1] = fn(self.sheet_stack[-1])
-        self._refresh_data()
+        self._refresh_surface()
 
     def _push_sheet(self, sheet: Sheet) -> None:
+        """Push onto the active surface: derived sheets (freq/describe) stay
+        on the catalog in catalog mode; otherwise dive into the Data tab."""
         self.sheet_stack.append(sheet)
+        if self.mode == "catalog":
+            self._refresh_catalog()
+            return
         self.mode = "data"
         self.query_one(TabbedContent).active = "tab_data"
         self._refresh_data()
@@ -701,6 +750,15 @@ class QsqlApp(App):
     # ---------- actions (footer bindings) ----------
 
     def action_pop_or_quit(self) -> None:
+        if self.mode == "catalog" and self.catalog_stack:
+            self.catalog_stack.pop()
+            if self.catalog_stack:
+                self._refresh_catalog()
+                return
+            self.mode = "cells"  # popped the root: back out to the cell list
+            self.query_one(TabbedContent).active = "tab_sql"
+            self._refresh_detail()
+            return
         if self.mode == "data" and self.sheet_stack:
             self.sheet_stack.pop()
             if self.sheet_stack:
@@ -755,22 +813,31 @@ class QsqlApp(App):
         self.title = f"quicksql · {self.path.name} · {state}"
 
     def action_frequency(self) -> None:
-        if self.mode == "data" and self.sheet_stack:
+        if self.mode in self.SHEET_MODES and self.sheet_stack:
             self._push_sheet(self.sheet_stack[-1].freq())
 
     def action_describe(self) -> None:
-        if self.mode == "data" and self.sheet_stack:
+        if self.mode in self.SHEET_MODES and self.sheet_stack:
             self._push_sheet(self.sheet_stack[-1].describe())
 
     def action_catalog(self) -> None:
-        if self.project:
-            self._catalog_worker(project_root_node(self.project, connect=self._catalog_connect))
+        """S: jump to the Catalog tab and dive straight into the listing."""
+        if not self.project:
+            return
+        tabs = self.query_one(TabbedContent)
+        if tabs.active != "tab_catalog":
+            tabs.active = "tab_catalog"  # the activation handler loads the root
+        if self.catalog_stack:
+            self.mode = "catalog"
+            self._refresh_catalog()
+        else:  # root still loading (threaded worker): dive when it lands
+            self._catalog_dive_pending = True
 
     def action_refetch(self) -> None:
         """ctrl+r: drop the current catalog sheet's cached frame and reload it."""
-        if self.mode != "data" or not self.sheet_stack:
+        if self.mode != "catalog" or not self.catalog_stack:
             return
-        node: CatalogNode | None = self.sheet_stack[-1].drill
+        node: CatalogNode | None = self.catalog_stack[-1].drill
         if node is None:
             return
         self._catalog_cache.invalidate(node)
@@ -787,7 +854,9 @@ class QsqlApp(App):
         return duckdb.connect()
 
     def _restore_subtitle(self) -> None:
-        if self.mode == "data" and self.sheet_stack:
+        if self.mode == "catalog" and self.catalog_stack:
+            self._refresh_catalog()
+        elif self.mode == "data" and self.sheet_stack:
             self._refresh_data()
         else:
             self._refresh_detail()
@@ -813,7 +882,7 @@ class QsqlApp(App):
         search.focus()
 
     def _show_filter(self) -> None:
-        if self.mode != "data" or not self.sheet_stack:
+        if self.mode not in self.SHEET_MODES or not self.sheet_stack:
             return
         self._input_mode = "filter"
         self._filter_base = self.sheet_stack[-1]
@@ -822,12 +891,12 @@ class QsqlApp(App):
     def _cancel_filter(self) -> None:
         if self._filter_base is not None and self.sheet_stack:
             self.sheet_stack[-1] = self._filter_base
-            self._refresh_data()
+            self._refresh_surface()
         self._filter_base = None
         self._input_mode = "search"
 
     def _yank(self) -> None:
-        if self.mode != "data" or not self.sheet_stack:
+        if self.mode not in self.SHEET_MODES or not self.sheet_stack:
             return
         sheet = self.sheet_stack[-1]
         if sheet.frame.height == 0:
@@ -843,7 +912,7 @@ class QsqlApp(App):
         self.notify(f"copied {len(values)} value(s) from {col!r}")
 
     def action_page(self, direction: int) -> None:
-        if self.mode == "data":
+        if self.mode in self.SHEET_MODES:
             self._mutate_sheet(lambda s: self._reconcile_to_viewport(s).move(direction * 20, 0))
         else:
             self.query_one("#cells", DataTable).move_cursor(
@@ -922,7 +991,7 @@ class QsqlApp(App):
         elif ch == "w":
             self._switch_pane()
 
-    TAB_ORDER = ["tab_sql", "tab_data", "tab_config", "tab_log"]
+    TAB_ORDER = ["tab_sql", "tab_data", "tab_config", "tab_log", "tab_catalog"]
 
     def _cycle_tab(self, delta: int) -> None:
         tabs = self.query_one(TabbedContent)
@@ -945,7 +1014,7 @@ class QsqlApp(App):
         return sheet if row == sheet.cursor[0] else sheet.move(row - sheet.cursor[0], 0)
 
     def _move(self, d_row: int = 0, d_col: int = 0, top: bool = False, bottom: bool = False) -> None:
-        if self.mode == "data":
+        if self.mode in self.SHEET_MODES:
             if top:
                 self._mutate_sheet(lambda s: s.top())
             elif bottom:
@@ -979,7 +1048,7 @@ class QsqlApp(App):
             return
         # live: re-filter the captured base on every keystroke
         self.sheet_stack[-1] = self._filter_base.filtered(event.value.strip())
-        self._refresh_data()
+        self._refresh_surface()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if self._input_mode == "filter":
@@ -990,7 +1059,7 @@ class QsqlApp(App):
             if base is not None and self.sheet_stack and self.sheet_stack[-1] is not base:
                 # commit: keep the filtered sheet on top, base beneath (q restores)
                 self.sheet_stack.insert(len(self.sheet_stack) - 1, base)
-                self._refresh_data()
+                self._refresh_surface()
             return
         needle = event.value.strip()
         self._last_search = needle
@@ -998,7 +1067,7 @@ class QsqlApp(App):
         self._hide_search()
         if not needle:
             return
-        if self.mode == "data":
+        if self.mode in self.SHEET_MODES:
             self._mutate_sheet(lambda s: s.search(needle))
         else:  # jump to the next cell whose name matches
             names = self._row_names
@@ -1013,17 +1082,39 @@ class QsqlApp(App):
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         """Browsing onto a tab (click or h/l) shows content but stays in cells
-        mode, so j/k keep moving the cell selection; Enter is what dives."""
+        mode, so j/k keep moving the cell selection; Enter is what dives. Each
+        stack-owning tab drops the *other* surface's dive state on entry, so a
+        direct jump (click, S) never leaves keys routed to an invisible stack."""
         active = self.query_one(TabbedContent).active
         if active == "tab_data":
+            # must not touch a "data" mode here: _push_sheet dives (sets the
+            # mode) *before* activating the tab, and this handler fires after
+            self._drop_catalog_dive()
             if not self.sheet_stack:
                 self._show_current_data()
+        elif active == "tab_catalog":
+            self._drop_data_dive()
+            if not self.catalog_stack and self.project:
+                self._catalog_worker(
+                    project_root_node(self.project, connect=self._catalog_connect)
+                )
         else:
-            self.mode = "cells"
-            if self.split:  # the split is a data-mode concern; drop it on the way out
-                self._collapse_panes(0)
-            self.sheet_stack = []
+            self._drop_data_dive()
+            self._drop_catalog_dive()
             self._refresh_detail()
+
+    def _drop_data_dive(self) -> None:
+        if self.mode == "data":
+            self.mode = "cells"
+        if self.split:  # the split is a data-mode concern; drop it on the way out
+            self._collapse_panes(0)
+        self.panes[self.active_pane] = []
+
+    def _drop_catalog_dive(self) -> None:
+        if self.mode == "catalog":
+            self.mode = "cells"
+        self.catalog_stack = []
+        self._refresh_catalog()  # clears the table + its shown-cache slot
 
     def _show_current_data(self) -> None:
         name = self.current_cell
@@ -1037,8 +1128,19 @@ class QsqlApp(App):
         self._activate_current_row()
 
     def _activate_current_row(self) -> None:
-        if self.mode == "data" and self.sheet_stack and self.sheet_stack[-1].drill is not None:
+        if (
+            self.mode in self.SHEET_MODES
+            and self.sheet_stack
+            and self.sheet_stack[-1].drill is not None
+        ):
             self._drill_current()  # Enter on a catalog sheet goes deeper
+            return
+        if self.query_one(TabbedContent).active == "tab_catalog":
+            # browsing the Catalog tab: dive into the listing (the catalog
+            # mirror of the preview dive below) — never reset to a cell preview
+            if self.catalog_stack:
+                self.mode = "catalog"
+                self._refresh_catalog()
             return
         name = self.current_cell
         if not name:
@@ -1063,20 +1165,28 @@ class QsqlApp(App):
         except Exception as exc:
             self.call_from_thread(self.log_line, f"catalog {node.title}: {exc}")
             self.call_from_thread(self.notify, f"catalog: {exc}", severity="error")
+            self.call_from_thread(setattr, self, "_catalog_dive_pending", False)
             self.call_from_thread(self._restore_subtitle)  # drop the loading… note
             return
         sheet = Sheet(frame, title=node.title, drill=node)
         if replace:  # refetch: swap the current sheet, keep the stack shape
             self.call_from_thread(self._replace_top_sheet, sheet)
         else:
-            self.call_from_thread(self._push_sheet, sheet)
+            self.call_from_thread(self._push_catalog_sheet, sheet)
+
+    def _push_catalog_sheet(self, sheet: Sheet) -> None:
+        self.catalog_stack.append(sheet)
+        if self._catalog_dive_pending:  # S while the root was loading
+            self._catalog_dive_pending = False
+            self.mode = "catalog"
+        self._refresh_catalog()
 
     def _replace_top_sheet(self, sheet: Sheet) -> None:
-        if self.sheet_stack:
-            self.sheet_stack[-1] = sheet
-            self._refresh_data()
+        if self.catalog_stack:
+            self.catalog_stack[-1] = sheet
+            self._refresh_catalog()
         else:
-            self._push_sheet(sheet)
+            self._push_catalog_sheet(sheet)
 
     @work(thread=True, exclusive=True, group="run")
     def _run_worker(self, select: Optional[list[str]], closure: bool = True) -> None:
