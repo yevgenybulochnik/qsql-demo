@@ -567,7 +567,16 @@ class QsqlApp(App):
 
     def _render_pane(self, idx: int, table: DataTable) -> None:
         active = idx == self.active_pane
-        sheet = self.panes[idx][-1]
+        side = ("L / " if idx == 0 else "R / ") if self.split else ""
+        self._render_sheet_table(self.panes[idx][-1], table, slot=idx, active=active, side=side)
+
+    def _render_sheet_table(
+        self, sheet: Sheet, table: DataTable, slot: int, active: bool, side: str = ""
+    ) -> None:
+        """Render a sheet into a DataTable, identity-cached per ``slot`` so
+        cursor moves reuse the built table (rebuilds only on content/window
+        changes, selection flips restyle in place). Shared by the data panes
+        (slots 0/1); ``side`` prefixes the sub_title when the pane is split."""
         cap = self._row_cap(sheet)
         cols = sheet.columns
         cursor_col = min(sheet.cursor[1], max(len(cols) - 1, 0))
@@ -576,7 +585,7 @@ class QsqlApp(App):
             start = max(0, min(cursor_col - self.MAX_DATA_COLS // 2, len(cols) - self.MAX_DATA_COLS))
         window = cols[start : start + self.MAX_DATA_COLS]
         shown = (sheet.frame, sheet.hidden, sheet.selected, start)
-        prev = self._data_shown[idx]
+        prev = self._data_shown[slot]
         selection_only = (
             prev is not None
             and window
@@ -590,12 +599,12 @@ class QsqlApp(App):
             # those cells' markers. A clear()+rebuild would set Textual's
             # _require_update_dimensions, which defers the cursor re-scroll a
             # frame and makes a scrolled viewport visibly jump on select.
-            self._data_shown[idx] = shown
+            self._data_shown[slot] = shown
             self._restyle_selection(table, sheet, prev[2], window[0], cap)
         elif prev is None or prev[0] is not shown[0] or prev[1:] != shown[1:]:
             # rebuild only when content or the column window changed; wide
             # frames make rebuilds expensive and cursor moves happen per keypress
-            self._data_shown[idx] = shown
+            self._data_shown[slot] = shown
             frame = sheet.frame.select(window)
             if cap is not None:
                 frame = frame.head(cap)
@@ -615,7 +624,6 @@ class QsqlApp(App):
             span = ""
             if len(cols) > self.MAX_DATA_COLS:
                 span = f" · cols {start + 1}-{start + len(window)}/{len(cols)}"
-            side = ("L / " if self.active_pane == 0 else "R / ") if self.split else ""
             self.sub_title = f"{side}{sheet.title} · {sheet.frame.height}x{len(cols)}{picked}{span}"
 
     def _restyle_selection(
