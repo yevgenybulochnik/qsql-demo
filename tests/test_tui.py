@@ -335,6 +335,21 @@ async def test_single_cell_run_does_not_arm_autorun(notebook) -> None:
         assert app.armed is False  # run-all is the explicit gate
 
 
+async def test_p_arms_autorun_without_running(notebook) -> None:
+    app = QsqlApp(path=notebook, watch=False)
+    async with app.run_test() as pilot:
+        assert app.armed is False
+        await pilot.press("p")  # arm watch reruns, but run nothing
+        assert app.armed is True
+        assert app.results == {}  # arming ran no cells (the whole point)
+        # a save is reactive now, even though run-all never happened
+        notebook.write_text(notebook.read_text().replace("range(10)", "range(5)"))
+        assert "events" in app._on_recompiled(compile_file(notebook))
+        await app.workers.wait_for_complete()
+        await pilot.press("p")  # toggles back off
+        assert app.armed is False
+
+
 def test_preview_frame_survives_interval_parquet(tmp_path) -> None:
     # duckdb round-trips INTERVAL parquet, but polars' reader panics on it;
     # the cold-start preview must go through duckdb instead
