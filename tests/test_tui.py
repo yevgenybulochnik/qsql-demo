@@ -501,7 +501,7 @@ async def test_catalog_browser_opens_drills_and_pops(notebook) -> None:
         await pilot.press("S")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert app.mode == "data"
+        assert app.mode == "catalog"
         top = app.sheet_stack[-1]
         assert top.title == "catalog"
         assert top.drill is not None
@@ -620,6 +620,78 @@ async def test_catalog_load_error_clears_loading_subtitle(notebook) -> None:
         assert not app.sub_title.startswith("loading")
 
 
+async def test_catalog_tab_browses_then_enter_dives(notebook) -> None:
+    # cycling onto the Catalog tab loads the root listing but stays in cells
+    # mode (browse pass-through, like the Data tab); Enter is what dives.
+    # Leaving the tab drops the listing; re-entry reloads the root.
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("h")  # cells mode: cycle backward, sql wraps to catalog
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.query_one(TabbedContent).active == "tab_catalog"
+        assert app.mode == "cells"  # browsing, not dived
+        assert app.catalog_stack and app.catalog_stack[-1].title == "catalog"
+        assert app.query_one("#catalog", DataTable).row_count > 0
+        await pilot.press("l")  # still browsing: h/l cycles on (catalog -> sql)
+        await pilot.pause()
+        assert app.query_one(TabbedContent).active == "tab_sql"
+        assert app.catalog_stack == []  # leaving the tab drops the dive state
+        await pilot.press("h")  # back onto Catalog: the root reloads
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.catalog_stack
+        await pilot.press("enter")  # dive: keys now live in the listing
+        assert app.mode == "catalog"
+        assert app.sheet_stack is app.catalog_stack  # active surface routes
+
+
+async def test_s_mid_data_dive_switches_surfaces_cleanly(notebook) -> None:
+    # S while dived in the Data sheet lands in a clean catalog dive: the
+    # data-pane dive is dropped and keys route to the catalog listing, never
+    # a stale invisible stack
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")  # dive into the cell's data sheet
+        assert app.mode == "data"
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.query_one(TabbedContent).active == "tab_catalog"
+        assert app.mode == "catalog"
+        assert not app.panes[0]  # the data dive was dropped with the tab
+        assert app.catalog_stack[-1].title == "catalog"
+        await pilot.press("q")  # pops the catalog root, not a data sheet
+        assert app.mode == "cells"
+        assert app.catalog_stack == []
+
+
+async def test_frequency_on_catalog_listing_stays_on_catalog_surface(notebook) -> None:
+    # F on a catalog sheet pushes the derived sheet onto the catalog stack —
+    # no flip to the Data tab — and q pops back to the listing
+    app = QsqlApp(path=notebook, watch=False, auto_run=False)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("S")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.mode == "catalog"
+        await pilot.press("F")  # frequency of the cursor column
+        await pilot.pause()
+        assert app.query_one(TabbedContent).active == "tab_catalog"  # no tab flip
+        assert app.mode == "catalog"
+        assert len(app.catalog_stack) == 2
+        await pilot.press("q")
+        assert len(app.catalog_stack) == 1
+        assert app.catalog_stack[-1].title == "catalog"
+
+
 async def test_enter_on_plain_data_sheet_still_resets_preview(notebook) -> None:
     # regression guard for the drill interception: sheets without a drill
     # payload keep the old Enter behavior (reset to the cell's preview)
@@ -683,7 +755,7 @@ async def test_live_filter_keeps_column_widths_stable(notebook) -> None:
         await pilot.press("j", "enter")  # field-path sheet
         await app.workers.wait_for_complete()
         await pilot.pause()
-        table = app.query_one("#data", DataTable)
+        table = app.query_one("#catalog", DataTable)
         widths_before = [c.get_render_width(table) for c in table.columns.values()]
         await pilot.press("f")
         await pilot.press("u", "s", "e", "r")  # narrows to a subset
@@ -882,7 +954,7 @@ async def test_catalog_shows_every_column_of_a_wide_postgres_table(pg_dsn, tmp_p
             leaf = app.sheet_stack[-1]
             assert leaf.frame.columns == ["column", "field_path", "type", "mode", "description"]
             assert leaf.frame.height == ncols  # the fetch has every column
-            table = app.query_one("#data", DataTable)
+            table = app.query_one("#catalog", DataTable)
             assert table.row_count == ncols  # ...and every column is rendered
     finally:
         with psycopg.connect(pg_dsn, autocommit=True) as con:
